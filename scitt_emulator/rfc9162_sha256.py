@@ -403,8 +403,25 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
             )
         if COSE_HEADER_ALG not in phdr:
             raise ClaimInvalidError("Claim does not have an algorithm header parameter")
+        # Section 6 of RFC 9943: "The CWT Claims value MUST include the Issuer
+        # Claim (Claim label 1) and the Subject Claim (Claim label 2)." The
+        # Receipt repeats them, so a statement without them cannot yield a
+        # conformant Receipt.
+        cwt_claims = phdr[COSE_HEADER_CWT_CLAIMS]
+        if not isinstance(cwt_claims, dict):
+            raise ClaimInvalidError(
+                "CWT Claims header parameter is not a CWT Claims Set"
+            )
+        for claim_key, claim_name in (
+            (CWT_CLAIM_ISS, "issuer (1)"),
+            (CWT_CLAIM_SUB, "subject (2)"),
+        ):
+            if not isinstance(cwt_claims.get(claim_key), str):
+                raise ClaimInvalidError(
+                    f"CWT Claims does not have a {claim_name} claim"
+                )
 
-    def _subject_of(self, claim: bytes) -> Optional[str]:
+    def _subject_of(self, claim: bytes) -> str:
         """
         The sub of the Signed Statement's CWT Claims, which the Receipt repeats
         so that a Receipt says what it is about (Figure 10 of RFC 9943).
@@ -412,13 +429,11 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
         Per RFC 9597 the CWT Claims header parameter holds a CWT Claims Set, a
         plain map, so no signature verification is involved in reading it; the
         Signed Statement's own signature is checked by the Registration Policy.
+        _validate_signed_statement has already established that sub is
+        present and is a string.
         """
         phdr = cbor2.loads(cbor2.loads(claim).value[0])
-        cwt_claims = phdr.get(COSE_HEADER_CWT_CLAIMS)
-        if not isinstance(cwt_claims, dict):
-            return None
-        subject = cwt_claims.get(CWT_CLAIM_SUB)
-        return subject if isinstance(subject, str) else None
+        return phdr[COSE_HEADER_CWT_CLAIMS][CWT_CLAIM_SUB]
 
     def _sign_receipt(self, claim: bytes, leaves: List[bytes], leaf_index: int) -> bytes:
         tree_size = len(leaves)
@@ -427,12 +442,13 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
 
         self._require_p256(self._cose_key())
 
+        # Figure 10 of RFC 9943: the Receipt names this Transparency Service
+        # as iss, and repeats the Signed Statement's sub so the Receipt says
+        # what it is about. Section 6 requires both.
         cwt_claims = {
             CWT_CLAIM_ISS: self.service_parameters.get("issuer", "transparency.example"),
+            CWT_CLAIM_SUB: self._subject_of(claim),
         }
-        subject = self._subject_of(claim)
-        if subject is not None:
-            cwt_claims[CWT_CLAIM_SUB] = subject
 
         # Figure 10 of RFC 9943: the Receipt's protected header.
         protected = cbor2.dumps(

@@ -157,11 +157,17 @@ def create_flask_app(config):
         if is_unavailable():
             return make_unavailable_error()
 
-        candidate_kids = [kid_value.encode("utf-8")]
+        # The base64url form is the one Section 2.2 requires this resource to
+        # accept for every kid, so it is tried first; the raw kid is accepted
+        # only where it is safe as a path segment, so it is the fallback.
+        # Serving the key set checks that no segment addresses two keys, which
+        # is what makes trying both forms unambiguous.
+        candidate_kids = []
         try:
             candidate_kids.append(base64url_decode(kid_value))
-        except Exception:
+        except ValueError:
             pass
+        candidate_kids.append(kid_value.encode("utf-8"))
 
         cose_key = None
         for candidate_kid in candidate_kids:

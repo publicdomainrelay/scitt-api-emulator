@@ -7,7 +7,9 @@ specified by RFC 9679.
 """
 
 import base64
+import binascii
 import hashlib
+import re
 from typing import Any, List
 
 import cbor2
@@ -49,8 +51,24 @@ COSE_KEY_THUMBPRINT_REQUIRED_LABELS = {
 }
 
 
+# Section 2 of RFC 7515, quoted by Section 2.2 of draft-ietf-scitt-scrapi-11:
+# the URL- and filename-safe alphabet of Section 5 of RFC 4648, with all
+# trailing "=" omitted.
+BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
 class UnsupportedKeyTypeError(Exception):
     pass
+
+
+class AmbiguousKeyIdentifierError(Exception):
+    """
+    Two keys in the key set are identified by the same URL.
+
+    Section 2.2 of draft-ietf-scitt-scrapi-11: "A Transparency Service MUST
+    NOT use kid values whose raw and base64url forms would make the same URL
+    identify different keys."
+    """
 
 
 def base64url_encode(value: bytes) -> str:
@@ -68,11 +86,57 @@ def base64url_decode(value: str) -> bytes:
     """
     Decode base64url without padding.
 
+    Characters outside the base64url alphabet are rejected rather than
+    silently discarded, so that a value which is not base64url is recognized
+    as such rather than aliasing onto some other key's identifier.
+
     >>> base64url_decode("c2NpdHQ")
     b'scitt'
+    >>> base64url_decode("not base64url!")
+    Traceback (most recent call last):
+    ValueError: ...
     """
+    if not value or not BASE64URL_RE.match(value):
+        raise ValueError(f"Not unpadded base64url: {value!r}")
     padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(value + padding)
+    try:
+        return base64.urlsafe_b64decode(value + padding)
+    except binascii.Error as error:
+        raise ValueError(f"Not unpadded base64url: {value!r}") from error
+
+
+def deterministic_dumps(value: dict) -> bytes:
+    """
+    Encode a CBOR map with the deterministic encoding of Section 4.2.1 of
+    RFC 8949: map keys sorted bytewise lexicographic on their *encoded* form.
+
+    cbor2's ``canonical=True`` is the RFC 7049 canonical ordering, which
+    RFC 8949 Section 4.2.3 describes as "length-first" and explicitly
+    distinguishes from Section 4.2.1. The two agree only while every key
+    encodes to the same number of bytes, so relying on it is a landmine for
+    any key or label outside that range:
+
+    >>> import cbor2
+    >>> labels = {1: 0, 10: 0, 100: 0, -1: 0}
+    >>> list(cbor2.loads(cbor2.dumps(labels, canonical=True)))
+    [1, 10, -1, 100]
+    >>> list(cbor2.loads(deterministic_dumps(labels)))
+    [1, 10, 100, -1]
+    """
+    encoded_items = sorted(
+        (cbor2.dumps(key), cbor2.dumps(item)) for key, item in value.items()
+    )
+    # A definite-length map header, then the sorted key/value pairs.
+    count = len(encoded_items)
+    if count < 24:
+        header = bytes([0xA0 | count])
+    elif count < 0x100:
+        header = bytes([0xB8, count])
+    elif count < 0x10000:
+        header = b"\xb9" + count.to_bytes(2, "big")
+    else:
+        header = b"\xba" + count.to_bytes(4, "big")
+    return header + b"".join(key + item for key, item in encoded_items)
 
 
 def cose_key_thumbprint(cose_key: dict, hash_alg: Any = hashlib.sha256) -> bytes:
@@ -99,9 +163,7 @@ def cose_key_thumbprint(cose_key: dict, hash_alg: Any = hashlib.sha256) -> bytes
                 f"COSE key of type {kty!r} is missing required label {label!r}"
             )
         required[label] = cose_key[label]
-    # cbor2's canonical encoding is the deterministic encoding of RFC 8949
-    # Section 4.2.1.
-    return hash_alg(cbor2.dumps(required, canonical=True)).digest()
+    return hash_alg(deterministic_dumps(required)).digest()
 
 
 def jwk_to_cose_key(jwk: dict) -> dict:
@@ -120,6 +182,11 @@ def jwk_to_cose_key(jwk: dict) -> dict:
     crv = JWK_CRV_TO_COSE_KEY_CRV.get(jwk.get("crv"))
     if crv is None:
         raise UnsupportedKeyTypeError(f"Unsupported curve: {jwk.get('crv')!r}")
+    for coordinate in ("x", "y"):
+        if not jwk.get(coordinate):
+            raise UnsupportedKeyTypeError(
+                f"EC JWK is missing its {coordinate!r} coordinate"
+            )
     cose_key = {
         COSE_KEY_KTY: COSE_KEY_TYPE_EC2,
         COSE_KEY_EC2_CRV: crv,
@@ -142,6 +209,29 @@ def encode_cose_key(cose_key: dict) -> bytes:
     return cbor2.dumps(cose_key)
 
 
+def check_key_identifiers_unambiguous(cose_keys: List[dict]) -> None:
+    """
+    Section 2.2 of draft-ietf-scitt-scrapi-11: "A Transparency Service MUST
+    NOT use kid values whose raw and base64url forms would make the same URL
+    identify different keys."
+
+    Raises AmbiguousKeyIdentifierError if any URL segment would resolve to
+    more than one key.
+    """
+    by_segment = {}
+    for cose_key in cose_keys:
+        kid = cose_key.get(COSE_KEY_KID)
+        if kid is None:
+            continue
+        for segment in kid_url_segments(kid):
+            claimed = by_segment.setdefault(segment, kid)
+            if claimed != kid:
+                raise AmbiguousKeyIdentifierError(
+                    f"Key identifiers {claimed!r} and {kid!r} are both "
+                    f"addressed by /.well-known/scitt-keys/{segment}"
+                )
+
+
 def kid_url_segments(kid: bytes) -> List[str]:
     """
     The path segments under /.well-known/scitt-keys that identify a key.
@@ -160,6 +250,10 @@ def kid_url_segments(kid: bytes) -> List[str]:
     try:
         raw = kid.decode("ascii")
     except UnicodeDecodeError:
+        return segments
+    # "." and ".." are dot-segments, which Section 5.2.4 of RFC 3986 tells
+    # clients to remove, so they never reach the resource.
+    if raw in (".", ".."):
         return segments
     # RFC 3986 Section 2.3 unreserved characters, plus the sub-delims and
     # characters permitted in a path segment without percent-encoding.
