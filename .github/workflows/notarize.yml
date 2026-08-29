@@ -62,7 +62,7 @@ jobs:
             core.setOutput('token', await core.getIDToken(SCITT_URL));
       - name: Create claim
         run: |
-          scitt-emulator client create-claim --issuer did:web:example.org --content-type application/json --payload "${PAYLOAD}" --out claim.cose
+          scitt-emulator client create-claim --issuer did:web:example.org --subject "${{ github.workflow_ref }}" --content-type application/json --payload "${PAYLOAD}" --out claim.cose
       - name: Submit claim
         env:
           OIDC_TOKEN: '${{ steps.github-oidc.outputs.token }}'
