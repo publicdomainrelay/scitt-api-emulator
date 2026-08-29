@@ -45,19 +45,20 @@ conda activate scitt
 
 ## Start the Proxy Server
 
-The proxy server supports 2 options currently:
+The proxy server supports 3 tree algorithms currently:
 
-- 'CCF' uses the emulator server to create and verify receipts using the CCF tree algorithm
+- 'RFC9162_SHA256' uses the emulator server to create and verify Receipts as COSE Sign1 messages carrying [RFC 9162](https://www.rfc-editor.org/rfc/rfc9162.html) inclusion proofs, as described in Section 7 of [RFC 9943](https://www.rfc-editor.org/rfc/rfc9943.html)
+- 'CCF' uses the emulator server to create and verify receipts using the CCF tree algorithm. It predates COSE Receipts and produces a structure with no counterpart in the current documents; see [ADR 0005](docs/adrs/0005-cose-receipts.md)
 - 'RKVST' uses the RKVST production SaaS server to create and verify  receipts using native Merkle trees
 
 **Note:** _the emulator is for experimentation only and not recommended for production use._
 
 ### Start a Fake Emulated SCITT Service
 
-1. Start the service, under the `/workspace` directory, using CCF
+1. Start the service, under the `/workspace` directory, using `RFC9162_SHA256`
 
     ```sh
-    ./scitt-emulator.sh server --workspace workspace/ --tree-alg CCF
+    ./scitt-emulator.sh server --workspace workspace/ --tree-alg RFC9162_SHA256
     ```
 
 1. The server is running at http://localhost:8000/ and uses the `workspace/` folder to store the service parameters and service state  
@@ -216,6 +217,8 @@ The following websites can be used to inspect COSE and CBOR files:
 ## Code Structure
 
 `scitt_emulator/scitt.py` contains the core SCITT algorithms that are agnostic of a specific tree algorithm.
+
+`scitt_emulator/rfc9162_sha256.py` is the implementation of the `RFC9162_SHA256` verifiable data structure, whose Receipts are COSE Sign1 messages as described in [Section 7 of RFC 9943](https://www.rfc-editor.org/rfc/rfc9943.html#name-receipts).
 
 `scitt_emulator/ccf.py` is the implementation of the [CCF tree algorithm](https://ietf-scitt.github.io/draft-birkholz-scitt-receipts/draft-birkholz-scitt-receipts.html#name-ccf-tree-algorithm).
 For each claim, a receipt is generated using a fake but valid Merkle tree that is independent of other submitted claims.

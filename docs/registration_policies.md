@@ -114,9 +114,10 @@ def main():
         "Failed to verify signature on statement",
     )
 
-    cwt_protected = cwt.decode(msg.phdr[CWTClaims], verification_key.cwt)
-    issuer = cwt_protected[1]
-    subject = cwt_protected[2]
+    # RFC 9597: the CWT Claims header parameter holds a CWT Claims Set.
+    cwt_claims = msg.phdr[CWTClaims]
+    issuer = cwt_claims[1]
+    subject = cwt_claims[2]
 
     issuer_key_as_object = verification_key_to_object(verification_key)
     unittest.TestCase().assertTrue(

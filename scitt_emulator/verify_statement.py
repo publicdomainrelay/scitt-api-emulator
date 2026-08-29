@@ -46,12 +46,12 @@ def verify_statement(
         else:
             raise TypeError(f"importlib.metadata.entry_points returned unknown type: {type(entrypoints)}: {entrypoints!r}")
 
-    # Figure out what the issuer is
-    cwt_cose_loads = cwt.cose.COSE()._loads
-    cwt_unverified_protected = cwt_cose_loads(
-        cwt_cose_loads(msg.phdr[CWTClaims]).value[2]
-    )
-    unverified_issuer = cwt_unverified_protected[1]
+    # Figure out what the issuer is. Per RFC 9597 the CWT Claims header
+    # parameter holds a CWT Claims Set, so the iss claim is read directly. It
+    # is unverified at this point; it only selects which keys to try, and the
+    # outer COSE_Sign1 signature is what is actually verified below.
+    cwt_claims = msg.phdr[CWTClaims]
+    unverified_issuer = cwt_claims[1]
 
     # Load keys from issuer and attempt verification. Return key used to verify
     for verification_key in preform_verification_key_transforms(
