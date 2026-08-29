@@ -1,4 +1,4 @@
-# 9. Coding and documentation best practices
+# 10. Coding and documentation best practices
 
 Date: 2026-08-29
 
