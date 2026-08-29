@@ -336,8 +336,9 @@ def test_phase_0_relying_party_workload_identity_token_response(tmp_path):
         )
         with Service(
             {
-                "middleware": OIDCAuthMiddleware,
-                "middleware_config_path": middleware_config_path,
+                # List form, matching how the server CLI passes --middleware.
+                "middleware": [OIDCAuthMiddleware],
+                "middleware_config_path": [middleware_config_path],
                 "tree_alg": "CCF",
                 "workspace": workspace_path,
                 "error_rate": 0.1,

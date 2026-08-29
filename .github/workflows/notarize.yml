@@ -123,7 +123,9 @@ jobs:
               --middleware scitt_emulator.oidc:OIDCAuthMiddleware \
               --middleware-config-path oidc-middleware-config.json &
             for i in $(seq 1 60); do
-              if curl -sf "http://127.0.0.1:8080/.well-known/scitt-keys" > /dev/null; then
+              # The OIDC middleware rejects unauthenticated requests with a 500,
+              # so any HTTP response means the server is up.
+              if curl -s -o /dev/null "http://127.0.0.1:8080/"; then
                 break
               fi
               sleep 1

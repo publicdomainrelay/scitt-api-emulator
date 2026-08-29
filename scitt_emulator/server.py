@@ -75,8 +75,18 @@ def create_flask_app(config):
     app.config.update(dict(DEBUG=True))
     app.config.update(config)
 
-    if app.config.get("middleware", None):
-        app.wsgi_app = app.config["middleware"](app.wsgi_app, app.config.get("middleware_config_path", None))
+    # The CLI exposes --middleware and --middleware-config-path as repeatable
+    # arguments, so each is a list; a single callable or Path is also accepted
+    # for parity with the test fixtures. Compose middleware in order.
+    middleware = app.config.get("middleware", None)
+    if middleware:
+        if not isinstance(middleware, (list, tuple)):
+            middleware = [middleware]
+        config_paths = app.config.get("middleware_config_path", None)
+        if not isinstance(config_paths, (list, tuple)):
+            config_paths = [config_paths] * len(middleware)
+        for m, config_path in zip(middleware, config_paths):
+            app.wsgi_app = m(app.wsgi_app, config_path)
 
     error_rate = app.config["error_rate"]
     use_lro = app.config["use_lro"]
