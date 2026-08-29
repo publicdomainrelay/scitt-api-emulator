@@ -24,7 +24,17 @@ from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE, 
 from scitt_emulator.tree_algs import TREE_ALGS
 from scitt_emulator.verify_statement import verify_statement
 from scitt_emulator.plugin_helpers import entrypoint_style_load
-from scitt_emulator.scitt import EntryNotFoundError, ClaimInvalidError, OperationNotFoundError
+from scitt_emulator.scitt import (
+    EntryNotFoundError,
+    ClaimInvalidError,
+    OperationNotFoundError,
+    RegistrationFailedError,
+    RegistrationRunningError,
+)
+
+# Section 2.3 of draft-ietf-scitt-scrapi-11: Signed Statements and Receipts are
+# COSE, exchanged as application/cose.
+COSE_CONTENT_TYPE = "application/cose"
 
 
 def make_error(title: str, detail: str, status_code: int, headers: dict = None):
@@ -76,6 +86,14 @@ def create_flask_app(config):
 
     def is_unavailable():
         return random.random() <= error_rate
+
+    def receipt_url(entry_id: str) -> str:
+        """
+        The URL of the Receipt resource for an EntryID (Section 2.4 of
+        draft-ietf-scitt-scrapi-11), used as the Location header on both
+        registration responses and on the Receipt itself.
+        """
+        return f"{request.host_url.rstrip('/')}/entries/{entry_id}"
 
     @app.route("/.well-known/scitt-keys", methods=["GET"])
     def get_scitt_keys():
@@ -152,18 +170,67 @@ def create_flask_app(config):
         response.headers["Link"] = '</.well-known/scitt-keys>; rel="successor-version"'
         return response
 
-    @app.route("/entries/<string:entry_id>/receipt", methods=["GET"])
-    def get_receipt(entry_id: str):
-        if is_unavailable():
-            return make_unavailable_error()
+    def resolve_receipt(entry_id: str):
+        """
+        Section 2.4 of draft-ietf-scitt-scrapi-11, Resolve Receipt: 200 once
+        registration is complete and the Receipt is available, 204 while
+        registration is still in progress, and 404 if no Receipt exists for
+        the EntryID, including when registration has failed.
+        """
         try:
-            receipt = app.scitt_service.get_receipt(entry_id)
+            receipt = app.scitt_service.get_entry_receipt(entry_id)
+        except RegistrationRunningError:
+            response = make_response(b"", 204)
+            # Section 2.4.2: SHOULD include Retry-After to help with polling,
+            # and SHOULD set Cache-Control: no-store because the in-progress
+            # response is transient.
+            response.headers["Retry-After"] = "1"
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        except RegistrationFailedError as e:
+            # Section 2.4.3: a 404 is also returned when an asynchronous
+            # registration has failed, and MAY be enriched with detail
+            # explaining why registration did not complete.
+            return make_error("Registration Failed", str(e), 404)
         except EntryNotFoundError as e:
             return make_error("Not Found", str(e), 404)
-        return send_file(BytesIO(receipt), download_name=f"{entry_id}.receipt.cbor")
+
+        response = make_response(receipt, 200)
+        response.headers["Content-Type"] = COSE_CONTENT_TYPE
+        response.headers["Location"] = receipt_url(entry_id)
+        return response
 
     @app.route("/entries/<string:entry_id>", methods=["GET"])
+    def get_entry_receipt(entry_id: str):
+        """Section 2.4 of draft-ietf-scitt-scrapi-11, Resolve Receipt."""
+        if is_unavailable():
+            return make_unavailable_error()
+        return resolve_receipt(entry_id)
+
+    @app.route("/entries/<string:entry_id>/receipt", methods=["GET"])
+    def get_receipt(entry_id: str):
+        """
+        Deprecated. Section 2.4 of draft-ietf-scitt-scrapi-11 makes the entry
+        resource itself the Receipt resource. Retained so existing consumers
+        of the emulator keep working.
+        """
+        if is_unavailable():
+            return make_unavailable_error()
+        response = resolve_receipt(entry_id)
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = f'<{receipt_url(entry_id)}>; rel="successor-version"'
+        return response
+
+    @app.route("/entries/<string:entry_id>/statement", methods=["GET"])
     def get_claim(entry_id: str):
+        """
+        Retrieve the registered Signed Statement.
+
+        SCRAPI defines no resource for this; it is an emulator extension, kept
+        because the bundled client and the interoperability tests rely on
+        being able to read back what was registered. It moved here from
+        /entries/{entryId}, which Section 2.4 makes the Receipt resource.
+        """
         if is_unavailable():
             return make_unavailable_error()
         try:
@@ -174,35 +241,59 @@ def create_flask_app(config):
 
     @app.route("/entries", methods=["POST"])
     def submit_claim():
+        """
+        Section 2.3 of draft-ietf-scitt-scrapi-11, Register Signed Statement.
+
+        Returns 201 with the Receipt when one can be produced in a reasonable
+        time, or 202 when it cannot. Either way the Location header names the
+        Receipt resource, and Section 2.3.1 requires it to be the same URL for
+        the same Signed Statement whichever mode was used.
+        """
         if is_unavailable():
             return make_unavailable_error()
         try:
-            if use_lro:
-                result = app.scitt_service.submit_claim(request.get_data(), long_running=True)
-                headers = {
-                    "Location": f"{request.host_url}/operations/{result['operationId']}",
-                    "Retry-After": "1"
-                }
-                status_code = 202
-            else:
-                result = app.scitt_service.submit_claim(request.get_data(), long_running=False)
-                headers = {
-                    "Location": f"{request.host_url}/entries/{result['entryId']}",
-                }
-                status_code = 201
+            result = app.scitt_service.submit_claim(
+                request.get_data(), long_running=use_lro
+            )
         except ClaimInvalidError as e:
             return make_error("Malformed request", str(e), 400)
-        return make_response(result, status_code, headers)
+
+        entry_id = result["entryId"]
+        location = receipt_url(entry_id)
+
+        if result["status"] == "succeeded":
+            # Section 2.3.1: if the Transparency Service is able to produce a
+            # Receipt within a reasonable time, it MAY return it directly.
+            receipt = app.scitt_service.get_entry_receipt(entry_id)
+            response = make_response(receipt, 201)
+            response.headers["Content-Type"] = COSE_CONTENT_TYPE
+            response.headers["Location"] = location
+            return response
+
+        # Section 2.3.2: the registration request is accepted but no Receipt
+        # can be produced in a reasonable time.
+        response = make_response(b"", 202)
+        response.headers["Location"] = location
+        response.headers["Retry-After"] = "1"
+        return response
 
     @app.route("/operations/<string:operation_id>", methods=["GET"])
     def get_operation(operation_id: str):
+        """
+        Deprecated. Operations are not a SCRAPI concept; Section 2.4 of
+        draft-ietf-scitt-scrapi-11 has clients poll the Receipt resource
+        instead. Retained so existing consumers of the emulator keep working.
+        """
         if is_unavailable():
             return make_unavailable_error()
         try:
             operation = app.scitt_service.get_operation(operation_id)
         except OperationNotFoundError as e:
             return make_error("Not Found", str(e), 404)
-        headers = {}
+        headers = {
+            "Deprecation": "true",
+            "Link": f'<{receipt_url(operation_id)}>; rel="successor-version"',
+        }
         if operation["status"] == "running":
             headers["Retry-After"] = "1"
         return make_response(operation, 200, headers)

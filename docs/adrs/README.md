@@ -12,3 +12,4 @@ that replaces it.
 | [0001](0001-align-with-rfc-9943-and-scrapi.md) | Align the emulator with RFC 9943 and draft-ietf-scitt-scrapi-11 | Accepted |
 | [0002](0002-rfc-9290-concise-problem-details-errors.md) | Use RFC 9290 Concise Problem Details for error responses | Accepted |
 | [0003](0003-cose-key-set-key-discovery.md) | Discover Receipt verification keys as a COSE Key Set | Accepted |
+| [0004](0004-registration-and-receipt-resolution.md) | Poll the Receipt resource instead of an operation | Accepted |

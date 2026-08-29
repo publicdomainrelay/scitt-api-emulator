@@ -4,6 +4,7 @@
 from typing import Optional
 from abc import ABC, abstractmethod
 from pathlib import Path
+from hashlib import sha256
 import time
 import json
 import uuid
@@ -12,7 +13,7 @@ import cbor2
 from pycose.messages import Sign1Message
 import pycose.headers
 
-from scitt_emulator.cose_keys import COSE_KEY_KID, jwk_to_cose_key
+from scitt_emulator.cose_keys import COSE_KEY_KID, base64url_encode, jwk_to_cose_key
 from scitt_emulator.create_statement import CWTClaims
 
 # temporary receipt header labels, see draft-birkholz-scitt-receipts
@@ -37,8 +38,58 @@ class OperationNotFoundError(Exception):
     pass
 
 
+class RegistrationRunningError(Exception):
+    """
+    Registration of the Signed Statement is still in progress, so no Receipt
+    is available yet. Section 2.4.2 of draft-ietf-scitt-scrapi-11 maps this to
+    a 204 No Content response.
+    """
+
+
+class RegistrationFailedError(Exception):
+    """
+    Registration of the Signed Statement failed, so no Receipt will ever be
+    produced. Section 2.4.3 of draft-ietf-scitt-scrapi-11 maps this to a 404,
+    optionally enriched with detail explaining why registration did not
+    complete.
+    """
+
+
 class PolicyResultDecodeError(Exception):
     pass
+
+
+def entry_id_for_claim(claim: bytes) -> str:
+    """
+    Derive the EntryID for a Signed Statement.
+
+    Section 2.3.1 of draft-ietf-scitt-scrapi-11 requires that a Transparency
+    Service supporting both synchronous and asynchronous registration return
+    the same Location URL for the same registered Signed Statement regardless
+    of which registration mode was used. Deriving the EntryID from the Signed
+    Statement itself satisfies that without any shared state between the two
+    paths.
+
+    The result is base64url without padding so that it is safe as a URI path
+    segment.
+
+    >>> entry_id_for_claim(b"a signed statement")
+    '6jZWRUsucVNMY4twAoE8SPd5w2aISvpeapJ-0SQEmik'
+    >>> entry_id_for_claim(b"a signed statement") == entry_id_for_claim(b"a signed statement")
+    True
+    """
+    return base64url_encode(sha256(claim).digest())
+
+
+def _failure_detail(operation: dict, entry_id: str) -> str:
+    error = operation.get("error")
+    if isinstance(error, dict):
+        detail = error.get("detail")
+        if detail:
+            return str(detail)
+    if error:
+        return str(error)
+    return f"Signed Statement with entry ID {entry_id} could not be persisted to the log"
 
 
 class SCITTServiceEmulator(ABC):
@@ -99,12 +150,17 @@ class SCITTServiceEmulator(ABC):
         raise NotImplementedError
 
     def get_operation(self, operation_id: str) -> dict:
+        """
+        Deprecated. Operations are not a SCRAPI concept; Section 2.4 of
+        draft-ietf-scitt-scrapi-11 has clients poll the Receipt resource
+        instead. Retained so existing consumers of the emulator keep working.
+        """
         operation_path = self.operations_path / f"{operation_id}.json"
         try:
             with open(operation_path, "r") as f:
                 operation = json.load(f)
         except FileNotFoundError:
-            raise EntryNotFoundError(f"Operation {operation_id} not found")
+            raise OperationNotFoundError(f"Operation {operation_id} not found")
         
         if operation["status"] == "running":
             # Pretend that the service finishes the operation after
@@ -130,62 +186,108 @@ class SCITTServiceEmulator(ABC):
         return claim
 
     def submit_claim(self, claim: bytes, long_running=True) -> dict:
+        """
+        Register a Signed Statement, per Section 2.3 of
+        draft-ietf-scitt-scrapi-11.
+
+        Returns a dict with the EntryID and a status of either "succeeded",
+        meaning a Receipt is available now, or "running", meaning the client
+        polls the Receipt resource. The EntryID is the same either way for the
+        same Signed Statement, as Section 2.3.1 requires.
+        """
         insert_policy = self.service_parameters.get("insertPolicy", DEFAULT_INSERT_POLICY)
+        entry_id = entry_id_for_claim(claim)
 
         if long_running:
-            return self._create_operation(claim)
+            return self._create_operation(claim, entry_id)
         elif insert_policy != MOST_PERMISSIVE_INSERT_POLICY:
             raise NotImplementedError(
                 f"non-* insertPolicy only works with long_running=True: {insert_policy!r}"
             )
         else:
-            return self._create_entry(claim)
+            entry = self._create_entry(claim, entry_id)
+            return {**entry, "status": "succeeded"}
 
-    def _create_entry(self, claim: bytes) -> dict:
-        last_entry_path = self.storage_path / "last_entry_id.txt"
-        if last_entry_path.exists():
-            with open(last_entry_path, "r") as f:
-                last_entry_id = int(f.read())
-        else:
-            last_entry_id = 0
-
-        entry_id = str(last_entry_id + 1)
-
+    def _create_entry(self, claim: bytes, entry_id: str) -> dict:
         self._create_receipt(claim, entry_id)
-
-        last_entry_path.write_text(entry_id)
 
         claim_path = self.storage_path / f"{entry_id}.cose"
         claim_path.write_bytes(claim)
 
         print(f"A COSE signed Claim was written to:  {claim_path}")
-    
-        entry = {"entryId": entry_id}
-        return entry
-    
-    def _create_operation(self, claim: bytes):
-        operation_id = str(uuid.uuid4())
-        operation_path = self.operations_path / f"{operation_id}.json"
-        claim_path = self.operations_path / f"{operation_id}.cose"
+
+        return {"entryId": entry_id}
+
+    def _create_operation(self, claim: bytes, entry_id: str) -> dict:
+        operation_path = self.operations_path / f"{entry_id}.json"
+        claim_path = self.operations_path / f"{entry_id}.cose"
 
         operation = {
-            "operationId": operation_id,
-            "status": "running"
+            "operationId": entry_id,
+            "entryId": entry_id,
+            "status": "running",
         }
 
         with open(operation_path, "w") as f:
             json.dump(operation, f)
-        
+
         with open(claim_path, "wb") as f:
             f.write(claim)
-        
-        print(f"Operation {operation_id} created")
+
+        print(f"Operation {entry_id} created")
         print(f"A COSE signed Claim was written to:  {claim_path}")
 
         return operation
 
+    def get_entry_receipt(self, entry_id: str) -> bytes:
+        """
+        Resolve the Receipt for an EntryID, per Section 2.4 of
+        draft-ietf-scitt-scrapi-11.
+
+        Raises RegistrationRunningError while registration is in progress
+        (204), and RegistrationFailedError or EntryNotFoundError when no
+        Receipt exists (404).
+        """
+        receipt_path = self.storage_path / f"{entry_id}.receipt.cbor"
+        if receipt_path.exists():
+            return receipt_path.read_bytes()
+
+        failure_path = self.operations_path / f"{entry_id}.failed.json"
+        if failure_path.exists():
+            failure = json.loads(failure_path.read_text())
+            raise RegistrationFailedError(
+                failure.get("detail", f"Registration of entry {entry_id} failed")
+            )
+
+        operation_path = self.operations_path / f"{entry_id}.json"
+        if not operation_path.exists():
+            raise EntryNotFoundError(
+                f"Receipt with entry ID {entry_id} not known to this "
+                f"Transparency Service"
+            )
+
+        operation = json.loads(operation_path.read_text())
+
+        if not operation.get("polled"):
+            # Pretend that the service takes some time to reach finality, so
+            # that clients exercise the 204 path of Section 2.4.2 rather than
+            # always seeing a Receipt on the first poll.
+            operation["polled"] = True
+            operation_path.write_text(json.dumps(operation))
+            raise RegistrationRunningError(entry_id)
+
+        operation = self._finish_operation(operation)
+
+        if operation["status"] == "succeeded":
+            return receipt_path.read_bytes()
+        if operation["status"] == "running":
+            raise RegistrationRunningError(entry_id)
+        raise RegistrationFailedError(
+            _failure_detail(operation, entry_id)
+        )
+
     def _sync_policy_result(self, operation: dict):
-        operation_id = operation["operationId"]
+        operation_id = operation["entryId"]
         policy_insert_path = self.operations_path / f"{operation_id}.policy.insert"
         policy_denied_path = self.operations_path / f"{operation_id}.policy.denied"
         policy_failed_path = self.operations_path / f"{operation_id}.policy.failed"
@@ -220,9 +322,9 @@ class SCITTServiceEmulator(ABC):
         return policy_result
 
     def _finish_operation(self, operation: dict):
-        operation_id = operation["operationId"]
-        operation_path = self.operations_path / f"{operation_id}.json"
-        claim_src_path = self.operations_path / f"{operation_id}.cose"
+        entry_id = operation["entryId"]
+        operation_path = self.operations_path / f"{entry_id}.json"
+        claim_src_path = self.operations_path / f"{entry_id}.cose"
 
         policy_result = self._sync_policy_result(operation)
         if policy_result["status"] == "running":
@@ -231,12 +333,20 @@ class SCITTServiceEmulator(ABC):
             operation["status"] = "failed"
             if "error" in policy_result:
                 operation["error"] = policy_result["error"]
+            # Record why registration failed. Section 2.4.3 of
+            # draft-ietf-scitt-scrapi-11 permits the 404 for a failed
+            # registration to be enriched with detail explaining why it did
+            # not complete, so the reason has to outlive the operation.
+            failure_path = self.operations_path / f"{entry_id}.failed.json"
+            failure_path.write_text(
+                json.dumps({"detail": _failure_detail(operation, entry_id)})
+            )
             operation_path.unlink()
             claim_src_path.unlink()
             return operation
 
         claim = claim_src_path.read_bytes()
-        entry = self._create_entry(claim)
+        entry = self._create_entry(claim, entry_id)
         claim_src_path.unlink()
 
         operation["status"] = "succeeded"

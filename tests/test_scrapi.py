@@ -4,11 +4,14 @@
 Conformance tests for the HTTP resources defined by
 draft-ietf-scitt-scrapi-11.
 """
+import pathlib
+import tempfile
+
 import cbor2
 import httpx
 import pytest
 
-from scitt_emulator import server
+from scitt_emulator import create_statement, server
 from scitt_emulator.client import describe_error_response
 from scitt_emulator.cose_keys import (
     COSE_KEY_EC2_CRV,
@@ -27,17 +30,49 @@ from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE
 from .test_cli import Service
 
 
-@pytest.fixture
-def service(tmp_path):
-    with Service(
+def make_service(tmp_path, use_lro=False):
+    return Service(
         {
             "tree_alg": "CCF",
             "workspace": tmp_path / "workspace",
             "error_rate": 0,
-            "use_lro": False,
+            "use_lro": use_lro,
         }
-    ) as service:
+    )
+
+
+@pytest.fixture
+def service(tmp_path):
+    with make_service(tmp_path) as service:
         yield service
+
+
+@pytest.fixture(params=[False, True], ids=["sync", "async"])
+def service_either_mode(request, tmp_path):
+    with make_service(tmp_path, use_lro=request.param) as service:
+        yield service
+
+
+def signed_statement():
+    """A Signed Statement the emulator will accept for registration."""
+    private_key_pem_path = tempfile.mktemp(suffix=".pem")
+    claim_path = tempfile.mktemp(suffix=".cose")
+    create_statement.create_claim(
+        pathlib.Path(claim_path),
+        "did:web:example.org",
+        "subject",
+        "application/json",
+        b'{"foo": "bar"}',
+    )
+    return pathlib.Path(claim_path).read_bytes()
+
+
+def register(service, claim):
+    return httpx.post(
+        f"{service.url}/entries",
+        content=claim,
+        headers={"Content-Type": "application/cose", "Accept": "application/cose"},
+    )
 
 
 def test_error_is_concise_problem_details(service):
@@ -231,3 +266,126 @@ def test_kid_url_segments_for_uri_safe_kid():
     assert kid_url_segments(b"kid1") == ["a2lkMQ", "kid1"]
     # Raw thumbprint bytes are not URI-safe, so only base64url is offered.
     assert kid_url_segments(bytes(range(32))) == [base64url_encode(bytes(range(32)))]
+
+
+def test_registration_location_is_the_receipt_resource(service_either_mode):
+    """
+    Section 2.3.1 and Section 2.3.2: the response MUST contain a Location
+    header field whose value is the URL of the (eventual) Receipt resource.
+    """
+    service = service_either_mode
+    response = register(service, signed_statement())
+
+    assert response.status_code in (201, 202)
+    location = response.headers["Location"]
+    assert location.startswith(f"{service.url}/entries/")
+
+
+def test_registration_modes_agree_on_location(tmp_path):
+    """
+    Section 2.3.1: Transparency Services that support both synchronous and
+    asynchronous registration MUST return the same Location URL for the same
+    registered Signed Statement regardless of which registration mode was
+    used.
+    """
+    claim = signed_statement()
+
+    with make_service(tmp_path / "sync", use_lro=False) as service:
+        sync_location = register(service, claim).headers["Location"]
+        sync_entry_id = sync_location.rsplit("/", 1)[-1]
+
+    with make_service(tmp_path / "async", use_lro=True) as service:
+        async_location = register(service, claim).headers["Location"]
+        async_entry_id = async_location.rsplit("/", 1)[-1]
+
+    assert sync_entry_id == async_entry_id
+
+
+def test_synchronous_registration_returns_the_receipt(service):
+    """
+    Section 2.3.1, Status 201: if the Transparency Service is able to produce
+    a Receipt within a reasonable time, it MAY return it directly, as
+    application/cose.
+    """
+    response = register(service, signed_statement())
+
+    assert response.status_code == 201
+    assert response.headers["content-type"].split(";")[0].strip() == "application/cose"
+    assert response.content
+    # The same bytes are served from the Receipt resource named by Location.
+    resolved = httpx.get(response.headers["Location"])
+    assert resolved.status_code == 200
+    assert resolved.content == response.content
+
+
+def test_asynchronous_registration_returns_202_then_the_receipt(tmp_path):
+    """
+    Section 2.3.2 and the sequence in Section 2.4.3: 202 with a Location, then
+    the client polls that resource until it returns 200 with the Receipt.
+    """
+    with make_service(tmp_path, use_lro=True) as service:
+        response = register(service, signed_statement())
+
+        assert response.status_code == 202
+        assert response.headers["Retry-After"]
+        assert response.content == b""
+        location = response.headers["Location"]
+
+        # Section 2.4.2, Status 204: registration is running.
+        running = httpx.get(location, headers={"Accept": "application/cose"})
+        assert running.status_code == 204
+        assert running.headers["Cache-Control"] == "no-store"
+        assert running.headers["Retry-After"]
+
+        # Section 2.4.1, Status 200: the Receipt is available.
+        done = httpx.get(location, headers={"Accept": "application/cose"})
+        assert done.status_code == 200
+        assert (
+            done.headers["content-type"].split(";")[0].strip() == "application/cose"
+        )
+        assert done.headers["Location"] == location
+        assert done.content
+
+
+def test_receipt_resource_serves_repeated_reads(service):
+    """
+    Section 2.4: the Receipt resource may be used at any later time to obtain
+    a fresh Receipt for a previously registered Signed Statement.
+    """
+    location = register(service, signed_statement()).headers["Location"]
+
+    for _ in range(3):
+        response = httpx.get(location, headers={"Accept": "application/cose"})
+        assert response.status_code == 200
+        assert response.content
+
+
+def test_receipt_resource_not_found(service):
+    """
+    Section 2.4.3: if there is no Receipt found for the specified EntryID the
+    Transparency Service MUST respond with a 4xx-class status code and a
+    Concise Problem Details object.
+    """
+    response = httpx.get(f"{service.url}/entries/no-such-entry")
+
+    assert response.status_code == 404
+    problem_details = cbor2.loads(response.content)
+    assert problem_details[-1] == "Not Found"
+    assert "no-such-entry" in problem_details[-2]
+
+
+def test_deprecated_receipt_subresource(service):
+    """
+    The /entries/{entryId}/receipt sub-resource is from an early SCRAPI
+    revision; Section 2.4 makes the entry resource itself the Receipt
+    resource. It is retained and marked deprecated.
+    """
+    location = register(service, signed_statement()).headers["Location"]
+    entry_id = location.rsplit("/", 1)[-1]
+
+    response = httpx.get(f"{service.url}/entries/{entry_id}/receipt")
+
+    assert response.status_code == 200
+    assert response.headers["Deprecation"] == "true"
+    assert response.headers["Link"] == f'<{location}>; rel="successor-version"'
+    assert response.content == httpx.get(location).content
