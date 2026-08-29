@@ -18,6 +18,7 @@ from scitt_emulator.rfc9162_sha256 import RFC9162SHA256SCITTServiceEmulator
 from tests.test_cli import Service
 
 
+# How many concurrent registrations and polls to exercise.
 REGISTRATIONS = 24
 
 

@@ -76,10 +76,7 @@ class ReceiptInvalidError(Exception):
 
 
 class UnsupportedServiceKeyError(Exception):
-    """
-    The configured service key cannot be used to sign Receipts as this
-    Verifiable Data Structure requires.
-    """
+    pass
 
 
 def leaf_hash(leaf_data: bytes) -> bytes:

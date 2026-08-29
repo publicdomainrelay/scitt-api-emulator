@@ -60,10 +60,7 @@ def make_unavailable_error():
     )
 
 
-# An EntryID is the last path segment of a Receipt resource URL. The emulator
-# derives it as unpadded base64url of a SHA-256 digest; anything outside that
-# alphabet, or longer than a filesystem name, is not a locator this service
-# could ever have issued.
+# EntryID path segments are unpadded base64url, Section 2.4 of draft-ietf-scitt-scrapi-11.
 ENTRY_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 

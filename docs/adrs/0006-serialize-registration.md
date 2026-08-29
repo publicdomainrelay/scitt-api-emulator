@@ -105,3 +105,7 @@ Also: `is_unavailable` used `random.random() <= error_rate`, so
   one proving a later position.
 * The `flock` is advisory and POSIX-only. The emulator already assumes a Linux
   environment.
+
+[scrapi]: https://datatracker.ietf.org/doc/draft-ietf-scitt-scrapi/11/
+[rfc9053]: https://www.rfc-editor.org/rfc/rfc9053.html
+[rfc9162]: https://www.rfc-editor.org/rfc/rfc9162.html
