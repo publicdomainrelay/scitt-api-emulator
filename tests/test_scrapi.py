@@ -389,3 +389,71 @@ def test_deprecated_receipt_subresource(service):
     assert response.headers["Deprecation"] == "true"
     assert response.headers["Link"] == f'<{location}>; rel="successor-version"'
     assert response.content == httpx.get(location).content
+
+
+def test_every_error_response_is_concise_problem_details(service):
+    """
+    Section 2: if the Transparency Service cannot process a client's request
+    it MUST return a 4xx or 5xx status code and the body MUST be a Concise
+    Problem Details object.
+
+    Flask generates HTML for unrouted paths, rejected methods and the like, so
+    those responses have to be converted too, not just the ones the resource
+    handlers produce.
+    """
+    responses = [
+        httpx.get(f"{service.url}/entries/" + "x" * 300),
+        httpx.get(f"{service.url}/no-such-resource"),
+        httpx.request("DELETE", f"{service.url}/entries"),
+        httpx.get(f"{service.url}/entries/"),
+    ]
+
+    for response in responses:
+        assert 400 <= response.status_code < 600, response.status_code
+        assert (
+            response.headers["content-type"].split(";")[0].strip()
+            == PROBLEM_DETAILS_CONTENT_TYPE
+        ), response.headers.get("content-type")
+        problem_details = cbor2.loads(response.content)
+        assert isinstance(problem_details[-1], str)
+        assert isinstance(problem_details[-2], str)
+
+
+def test_invalid_locator(service):
+    """
+    Section 2.3.3 defines the "Invalid locator" error for an operation locator
+    that is not in a valid form.
+    """
+    response = httpx.get(f"{service.url}/entries/" + "x" * 300)
+
+    assert response.status_code == 400
+    problem_details = cbor2.loads(response.content)
+    assert problem_details[-1] == "Invalid locator"
+    assert problem_details[-2] == "Operation locator is not in a valid form"
+
+
+def test_malformed_statement_in_asynchronous_mode_reaches_a_terminal_404(tmp_path):
+    """
+    A Signed Statement that cannot be registered at all is the 400 of Section
+    2.3.3 in synchronous mode. In asynchronous mode the request that would
+    have carried it is long gone, so it must become the 404 of Section 2.4.3
+    with detail, and must stay that way rather than failing on every poll.
+    """
+    with make_service(tmp_path, use_lro=True) as service:
+        response = httpx.post(
+            f"{service.url}/entries",
+            content=b"not a COSE message",
+            headers={"Content-Type": "application/cose"},
+        )
+        assert response.status_code == 202
+        location = response.headers["Location"]
+
+        assert httpx.get(location).status_code == 204
+        for _ in range(3):
+            failed = httpx.get(location)
+            assert failed.status_code == 404
+            assert (
+                failed.headers["content-type"].split(";")[0].strip()
+                == PROBLEM_DETAILS_CONTENT_TYPE
+            )
+            assert cbor2.loads(failed.content)[-1] == "Registration Failed"
