@@ -14,6 +14,7 @@ import pytest
 from scitt_emulator import create_statement, server
 from scitt_emulator.client import describe_error_response
 from scitt_emulator.cose_keys import (
+    AmbiguousKeyIdentifierError,
     COSE_KEY_EC2_CRV,
     COSE_KEY_EC2_X,
     COSE_KEY_EC2_Y,
@@ -21,11 +22,15 @@ from scitt_emulator.cose_keys import (
     COSE_KEY_KTY,
     COSE_KEY_CRV_P256,
     COSE_KEY_TYPE_EC2,
+    base64url_decode,
     base64url_encode,
+    check_key_identifiers_unambiguous,
     cose_key_thumbprint,
+    deterministic_dumps,
     kid_url_segments,
 )
 from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE
+from scitt_emulator.errors import decode_problem_details
 
 from .test_cli import Service
 
@@ -457,3 +462,109 @@ def test_malformed_statement_in_asynchronous_mode_reaches_a_terminal_404(tmp_pat
                 == PROBLEM_DETAILS_CONTENT_TYPE
             )
             assert cbor2.loads(failed.content)[-1] == "Registration Failed"
+
+
+def test_cose_key_thumbprint_matches_rfc_9679_test_vector():
+    """
+    RFC 9679 requires the deterministic encoding of Section 4.2.1 of RFC 8949,
+    which orders map keys bytewise on their encoded form. cbor2's
+    `canonical=True` is the RFC 7049 length-first ordering that Section 4.2.3
+    explicitly distinguishes from it; the two agree only while every key
+    encodes to the same width.
+
+    This is the example key and thumbprint from RFC 9679.
+    """
+    cose_key = {
+        COSE_KEY_KTY: COSE_KEY_TYPE_EC2,
+        COSE_KEY_EC2_CRV: COSE_KEY_CRV_P256,
+        COSE_KEY_EC2_X: bytes.fromhex(
+            "65eda5a12577c2bae829437fe338701a10aaa375e1bb5b5de108de439c08551d"
+        ),
+        COSE_KEY_EC2_Y: bytes.fromhex(
+            "1e52ed75701163f7f9e40ddf9f341b3dc9ba860af7e0ca7ca7e9eecd0084d19c"
+        ),
+    }
+
+    assert cose_key_thumbprint(cose_key).hex() == (
+        "496bd8afadf307e5b08c64b0421bf9dc01528a344a43bda88fadd1669da253ec"
+    )
+
+
+def test_deterministic_encoding_orders_keys_bytewise():
+    """
+    Section 4.2.1 of RFC 8949 orders by the encoded key bytes, so label 100
+    sorts before -1. Length-first ordering puts -1 first.
+    """
+    encoded = deterministic_dumps({1: 0, 10: 0, 100: 0, -1: 0, -2: 0, -100: 0})
+
+    assert list(cbor2.loads(encoded)) == [1, 10, 100, -1, -2, -100]
+
+
+def test_ambiguous_key_identifiers_are_rejected():
+    """
+    Section 2.2: "A Transparency Service MUST NOT use kid values whose raw and
+    base64url forms would make the same URL identify different keys."
+    """
+    raw_kid = {COSE_KEY_KTY: COSE_KEY_TYPE_EC2, COSE_KEY_KID: b"kid1"}
+    shadowed = {
+        COSE_KEY_KTY: COSE_KEY_TYPE_EC2,
+        COSE_KEY_KID: base64url_decode("kid1"),
+    }
+
+    # Either alone is fine.
+    check_key_identifiers_unambiguous([raw_kid])
+    check_key_identifiers_unambiguous([shadowed])
+
+    # Together, /.well-known/scitt-keys/kid1 would identify both.
+    with pytest.raises(AmbiguousKeyIdentifierError):
+        check_key_identifiers_unambiguous([raw_kid, shadowed])
+
+
+def test_individual_key_prefers_the_base64url_form(service):
+    """
+    Section 2.2 makes the base64url form the one this resource MUST accept for
+    every kid; the raw kid is accepted only where it is safe as a path
+    segment. So base64url is resolved first.
+    """
+    cose_key_set = cbor2.loads(
+        httpx.get(f"{service.url}/.well-known/scitt-keys").content
+    )
+    kid = cose_key_set[0][COSE_KEY_KID]
+
+    response = httpx.get(
+        f"{service.url}/.well-known/scitt-keys/{base64url_encode(kid)}"
+    )
+
+    assert response.status_code == 200
+    assert cbor2.loads(response.content)[COSE_KEY_KID] == kid
+
+
+def test_padded_base64url_kid_is_rejected(service):
+    """
+    Section 2 of RFC 7515, quoted by Section 2.2: base64url with "all trailing
+    '=' characters omitted". Accepting the padded form would mean two URLs
+    identify one key.
+    """
+    cose_key_set = cbor2.loads(
+        httpx.get(f"{service.url}/.well-known/scitt-keys").content
+    )
+    kid = cose_key_set[0][COSE_KEY_KID]
+    padded = base64url_encode(kid) + "="
+
+    assert httpx.get(f"{service.url}/.well-known/scitt-keys/{padded}").status_code == 404
+
+
+def test_problem_details_rejects_malformed_language_tagged_text():
+    """
+    Appendix A of RFC 9290 defines tag 38 as a two element array. Anything
+    else must be reported as an invalid problem details object, so the client
+    falls back to the status class rather than raising.
+    """
+    for malformed in ([], 5, ["en"], "en"):
+        body = cbor2.dumps({-1: cbor2.CBORTag(38, malformed)})
+        with pytest.raises(ValueError):
+            decode_problem_details(body)
+
+    # A well-formed tag 38 still decodes.
+    body = cbor2.dumps({-1: cbor2.CBORTag(38, ["en", "Not Found"])})
+    assert decode_problem_details(body)["title"] == "Not Found"

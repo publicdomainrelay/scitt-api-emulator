@@ -16,7 +16,12 @@ import cbor2
 from pycose.messages import Sign1Message
 import pycose.headers
 
-from scitt_emulator.cose_keys import COSE_KEY_KID, base64url_encode, jwk_to_cose_key
+from scitt_emulator.cose_keys import (
+    COSE_KEY_KID,
+    base64url_encode,
+    check_key_identifiers_unambiguous,
+    jwk_to_cose_key,
+)
 from scitt_emulator.create_statement import CWTClaims
 
 # temporary receipt header labels, see draft-birkholz-scitt-receipts
@@ -150,10 +155,15 @@ class SCITTServiceEmulator(ABC):
         default. A tree algorithm whose keys are natively COSE should override
         this rather than round-tripping through JWK.
         """
-        return [
+        cose_keys = [
             jwk_to_cose_key(jwk_key_as_dict)
             for jwk_key_as_dict in self.keys_as_jwks().values()
         ]
+        # Section 2.2 of draft-ietf-scitt-scrapi-11 forbids a key set whose
+        # kids would make one URL identify different keys. Checking here means
+        # a tree algorithm assigning its own kids cannot publish such a set.
+        check_key_identifiers_unambiguous(cose_keys)
+        return cose_keys
 
     def key_by_kid(self, kid: bytes):
         """

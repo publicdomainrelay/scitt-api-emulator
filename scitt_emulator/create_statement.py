@@ -30,12 +30,6 @@ class CWTClaims(pycose.headers.CoseHeaderAttribute):
 
 
 @pycose.headers.CoseHeaderAttribute.register_attribute()
-class RegInfo(pycose.headers.CoseHeaderAttribute):
-    identifier = 393
-    fullname = "REG_INFO"
-
-
-@pycose.headers.CoseHeaderAttribute.register_attribute()
 class Receipts(pycose.headers.CoseHeaderAttribute):
     identifier = 394
     fullname = "RECEIPTS"
@@ -69,28 +63,6 @@ def create_claim(
     receipts: Optional[List[bytes]] = None,
 ):
     # https://ietf-wg-scitt.github.io/draft-ietf-scitt-architecture/draft-ietf-scitt-architecture.html#name-signed-statement-envelope
-
-    # Registration Policy (label: TBD, temporary: 393): A map containing
-    # key/value pairs set by the Issuer which are sealed on Registration and
-    # non-opaque to the Transparency Service. The key/value pair semantics are
-    # specified by the Issuer or are specific to the CWT_Claims iss and
-    # CWT_Claims sub tuple.
-    # Examples: the sequence number of signed statements
-    # on a CWT_Claims Subject, Issuer metadata, or a reference to other
-    # Transparent Statements (e.g., augments, replaces, new-version, CPE-for)
-    # Reg_Info = {
-    reg_info = {
-        #   ? "register_by": uint .within (~time),
-        "register_by": 1000,
-        #   ? "sequence_no": uint,
-        "sequence_no": 0,
-        #   ? "issuance_ts": uint .within (~time),
-        "issuance_ts": 1000,
-        #   ? "no_replay": null,
-        "no_replay": None,
-        #   * tstr => any
-    }
-    # }
 
     # Create COSE_Sign1 structure
     # Create an ad-hoc key
@@ -155,20 +127,20 @@ def create_claim(
         # shows it that way; it is not a nested, separately signed CWT. The
         # outer COSE_Sign1 signature protects it.
         CWTClaims: cwt_claims,
-        #   393 => Reg_Info        ; Registration Policy info,
-        RegInfo: reg_info,
         #   3   => tstr            ; payload type
         pycose.headers.ContentType: content_type,
     }
     # }
 
     # Unprotected_Header = {
-    unprotected = {
-        #   ? 394 => [+ bstr .cbor Receipt]
-        # Figure 7 of RFC 9943: a Signed Statement with Receipts in its
-        # unprotected header is a Transparent Statement.
-        Receipts: receipts,
-    }
+    unprotected = {}
+    #   ? 394 => [+ bstr .cbor Receipt]
+    # Figure 7 of RFC 9943: a Signed Statement with Receipts in its
+    # unprotected header is a Transparent Statement. Figure 3 types label 394
+    # as [+ bstr .cbor Receipt], so it is omitted rather than set to nil when
+    # there are no Receipts.
+    if receipts:
+        unprotected[Receipts] = receipts
     # }
 
     # https://github.com/TimothyClaeys/pycose/blob/e527e79b611f6cc6673bbb694056a7468c2eef75/pycose/messages/cosemessage.py#L84-L91
@@ -202,9 +174,10 @@ def create_claim(
     hash_instance.update(claim)
 
     base_encoding = "base64url"
-    base64url_encoded_bytes_digest = base64.urlsafe_b64encode(
-        hash_instance.digest(),
-    ).decode()
+    # Section 2 of RFC 7515 base64url omits all trailing "=".
+    base64url_encoded_bytes_digest = (
+        base64.urlsafe_b64encode(hash_instance.digest()).decode().rstrip("=")
+    )
 
     return f"urn:ietf:params:scitt:{message_type}:{hash_name}:{base_encoding}:{base64url_encoded_bytes_digest}"
 

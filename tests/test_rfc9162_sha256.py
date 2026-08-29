@@ -282,3 +282,39 @@ def test_verify_receipt_rejects_an_unknown_verifiable_data_structure(service, tm
 
     with pytest.raises(ReceiptInvalidError, match="verifiable data structure"):
         verifying_service(service).verify_receipt(claim_path, receipt_path)
+
+
+def test_receipt_cwt_claims_always_carries_issuer_and_subject(service, tmp_path):
+    """
+    Section 6 of RFC 9943: "The CWT Claims value MUST include the Issuer Claim
+    (Claim label 1) and the Subject Claim (Claim label 2)." This holds for a
+    Receipt's protected header as much as a Signed Statement's.
+    """
+    receipt = register(service, make_statement(tmp_path).read_bytes()).content
+
+    cwt_claims = cbor2.loads(cbor2.loads(receipt).value[0])[COSE_HEADER_CWT_CLAIMS]
+
+    assert isinstance(cwt_claims[CWT_CLAIM_ISS], str)
+    assert isinstance(cwt_claims[CWT_CLAIM_SUB], str)
+
+
+def test_statement_without_subject_is_rejected(service, tmp_path):
+    """
+    A Signed Statement whose CWT Claims lack iss or sub cannot yield a
+    conformant Receipt, so it is not registered.
+    """
+    for cwt_claims in ({}, {CWT_CLAIM_ISS: "iss"}, {CWT_CLAIM_SUB: "sub"}):
+        protected = cbor2.dumps(
+            {COSE_HEADER_ALG: COSE_ALG_ES256, COSE_HEADER_CWT_CLAIMS: cwt_claims}
+        )
+        claim = cbor2.dumps(
+            cbor2.CBORTag(COSE_SIGN1_TAG, [protected, {}, b"payload", b"signature"])
+        )
+
+        response = httpx.post(
+            f"{service.url}/entries",
+            content=claim,
+            headers={"Content-Type": "application/cose"},
+        )
+
+        assert response.status_code == 400, cwt_claims

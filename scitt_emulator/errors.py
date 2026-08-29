@@ -63,9 +63,16 @@ def decode_problem_details(body: bytes) -> dict:
         if value is None:
             continue
         # oltext is either a text string or a tag 38 language-tagged string,
-        # which is a two element array of language tag and text.
+        # which Appendix A of RFC 9290 defines as a two element array of
+        # language tag and text. Anything else shaped like tag 38 is not one.
         if isinstance(value, cbor2.CBORTag) and value.tag == 38:
-            value = value.value[1]
+            tagged = value.value
+            if not isinstance(tagged, (list, tuple)) or len(tagged) != 2:
+                raise ValueError(
+                    f"Problem details {name} is tagged as a language-tagged "
+                    f"string but is not a two element array"
+                )
+            value = tagged[1]
         if not isinstance(value, str):
             raise ValueError(f"Problem details {name} is not text")
         problem_details[name] = value
