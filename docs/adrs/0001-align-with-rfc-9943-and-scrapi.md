@@ -44,11 +44,30 @@ changes, each of which leaves the emulator working end to end:
 
 1. **Errors** — adopt RFC 9290 Concise Problem Details. See [ADR 0002](0002-rfc-9290-concise-problem-details-errors.md).
 2. **Key discovery** — add `/.well-known/scitt-keys` and
-   `/.well-known/scitt-keys/{kid_value}`.
+   `/.well-known/scitt-keys/{kid_value}`. See [ADR 0003](0003-cose-key-set-key-discovery.md).
 3. **Registration and Receipt resolution** — reshape `POST /entries` and make
-   `GET /entries/{entryId}` the Receipt resource with `200`/`204`/`404`.
+   `GET /entries/{entryId}` the Receipt resource with `200`/`204`/`404`. See
+   [ADR 0004](0004-registration-and-receipt-resolution.md).
 4. **Receipt and Statement formats** — COSE Sign1 Receipts carrying RFC 9162
-   inclusion proofs, and the RFC 9597 CWT Claims label.
+   inclusion proofs, and the RFC 9597 CWT Claims label. See
+   [ADR 0005](0005-cose-receipts.md).
+
+### What is left
+
+The gap table above is closed for every row. What remains, each recorded in the
+ADR for the change that met it, is:
+
+* fresh Receipt re-issuance and key retirement, neither of which the emulator's
+  single-key, issue-once storage model supports
+  ([ADR 0003](0003-cose-key-set-key-discovery.md),
+  [ADR 0005](0005-cose-receipts.md));
+* the RKVST tree algorithm, which overrides the registration and Receipt
+  methods with SaaS-backed implementations and cannot be run here because its
+  `archivist` client library is unpublished
+  ([ADR 0004](0004-registration-and-receipt-resolution.md));
+* the deprecated resources — `/.well-known/transparency-configuration`,
+  `/operations/{operationId}`, and `/entries/{entryId}/receipt` — which are
+  removed once SCRAPI is published as an RFC.
 
 Where a legacy resource is still useful to existing users of this emulator, it
 is kept and marked deprecated rather than removed outright, so that a single
