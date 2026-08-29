@@ -3,12 +3,12 @@
 # Virtual CCF (non-SGX) build and run:
 #   $ docker build -t ghcr.io/scitt-community/scitt-api-emulator:main --progress plain .
 #   $ docker run --rm -ti -w /src/src/scitt-api-emulator -v $PWD:/src/src/scitt-api-emulator -p 8000:8000 ghcr.io/scitt-community/scitt-api-emulator:main
-FROM python:3.8
+FROM python:3.13
 
-WORKDIR /usr/src/scitt-api-emulater
+WORKDIR /usr/src/scitt-api-emulator
 
 COPY setup.py ./
-RUN mkdir -p scitt_emulater \
+RUN mkdir -p scitt_emulator \
   && pip install --no-cache-dir -e .
 
 COPY . .
