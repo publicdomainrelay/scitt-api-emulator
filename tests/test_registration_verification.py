@@ -6,26 +6,26 @@ Signed Statement signature verification at registration, as RFC 9943 Section
 """
 import os
 import pathlib
-import tempfile
 
 import cbor2
 import httpx
 import pytest
-
-# Resolve did:web to plain http so the issuer names this test service.
-os.environ["DID_WEB_ASSUME_SCHEME"] = "http"
 
 from scitt_emulator import create_statement
 from scitt_emulator.did_helpers import url_to_did_web
 
 from tests.test_cli import Service
 
+# Resolve did:web to plain http so the issuer names this test service. Set at
+# import time, before any did:web resolution.
+os.environ["DID_WEB_ASSUME_SCHEME"] = "http"
+
+# COSE_Sign1 CBOR tag, RFC 9052 Section 4.2.
 COSE_SIGN1_TAG = 18
+# COSE algorithm header label, RFC 9052 Section 3.
 COSE_HEADER_ALG = 1
 # HS256 is symmetric; the emulator signs with asymmetric algorithms, so it
-# decodes as a known COSE algorithm and is rejected as unsupported. An
-# entirely unknown identifier makes pycose refuse to decode the statement at
-# all, which is the "Malformed request" path instead.
+# decodes as a known COSE algorithm and is rejected as unsupported.
 UNSUPPORTED_ALG = 5
 
 

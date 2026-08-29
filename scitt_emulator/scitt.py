@@ -33,6 +33,10 @@ COSE_Headers_Issued_At = "issued_at"
 MOST_PERMISSIVE_INSERT_POLICY = "*"
 DEFAULT_INSERT_POLICY = MOST_PERMISSIVE_INSERT_POLICY
 
+# COSE algorithm identifiers the emulator can verify, Section 2.3.3 "Bad
+# Signature Algorithm". ES256 (-7), ES384 (-35), ES512 (-36), EdDSA (-8).
+SUPPORTED_SIGNATURE_ALGORITHMS = {-7, -35, -36, -8}
+
 
 class ClaimInvalidError(Exception):
     pass
@@ -48,11 +52,6 @@ class UnsupportedAlgorithmError(ClaimInvalidError):
 
 class SignatureVerificationError(ClaimInvalidError):
     """Section 2.3.3: "Rejected". The Signed Statement is not accepted."""
-
-
-# COSE algorithm identifiers the emulator can verify, Section 2.3.3 "Bad
-# Signature Algorithm". ES256 (-7), ES384 (-35), ES512 (-36), EdDSA (-8).
-SUPPORTED_SIGNATURE_ALGORITHMS = {-7, -35, -36, -8}
 
 
 class EntryNotFoundError(Exception):
@@ -350,7 +349,7 @@ class SCITTServiceEmulator(ABC):
             verification_key = verify_statement(msg)
         except Exception as error:
             raise SignatureVerificationError(
-                f"Could not verify the Signed Statement signature: {error}"
+                f"Could not verify the Signed Statement signature: {error!r}"
             ) from error
         if verification_key is None:
             raise SignatureVerificationError(

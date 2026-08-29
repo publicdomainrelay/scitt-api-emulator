@@ -2,7 +2,7 @@ import json
 import contextlib
 import urllib.parse
 import urllib.request
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import cbor2
 import cwt
@@ -146,7 +146,7 @@ def transform_key_instance_jwcrypto_jwk_to_cwt_cose(
     )
 
 
-def to_object_cose_key(verification_key: VerificationKey) -> dict:
+def to_object_cose_key(verification_key: VerificationKey) -> Optional[dict]:
     """
     Convert a VerificationKey that came from a COSE Key Set into a JWK object,
     so that a Registration Policy can use a key discovered from

@@ -81,34 +81,33 @@ the server but never raised; ADR records the gap.
 closes the ADR 0003 regression and is what lets signature verification and the
 policy engine agree on keys from the current discovery resource.
 
-## Bugs found while making the docs tests green
+* The four failing docs tests that this change also fixed were two regressions
+  from this series, one pre-existing unfinished test, and one race.
 
-The four failing docs tests turned out to be two regressions from this series,
-one pre-existing unfinished test, and one genuine race.
-
-* **oidc/ssh/nop deny-path tests** asserted the pre-SCRAPI operation-based flow
-  (`ClaimOperationError` with a JSON operation). Registration now polls the
-  Receipt resource and a policy denial surfaces as the `404` "Registration
-  Failed" of Section 2.4.3. The tests were updated to the new flow.
-* **nop test**: the policy engine's validator could not convert a COSE-discovered
-  key (the regression above). Fixed by `to_object_cose_key`.
-* **phase_0 test** referenced a non-existent workload-identity-token endpoint
-  and an undefined `client`, and built its OIDC service from a Flask app with
-  no routes. The dead lines were removed, the OIDC service now uses the OIDC
-  fixture, and the middleware wiring was corrected. It is a genuinely unfinished
-  test, now repaired enough to exercise the OIDC middleware path it was written
-  for.
-* **Race**: re-registering a failed statement reused the content-derived
-  EntryID, and `get_entry_receipt` short-circuited on the stale failure record.
-  A re-registration now clears the stale record, and `_sync_policy_result`
-  ignores policy files older than the current operation file — an external
-  policy engine can have a validation in flight when an attempt is torn down,
-  and its late `denied` file must not be read as this attempt's outcome.
-* The test server was **single-threaded** (`werkzeug.make_server` default),
-  while Flask's own server is threaded. Signature verification resolves the
-  Issuer's key by fetching it, which may be the service itself; a single-
-  threaded server cannot serve that fetch while handling the request, and the
-  request deadlocked. The test fixture now uses a threaded server.
+  * **oidc/ssh/nop deny-path tests** asserted the pre-SCRAPI operation-based
+    flow (`ClaimOperationError` with a JSON operation). Registration now polls
+    the Receipt resource and a policy denial surfaces as the `404` "Registration
+    Failed" of Section 2.4.3. The tests were updated to the new flow.
+  * **nop test**: the policy engine's validator could not convert a
+    COSE-discovered key (the regression above). Fixed by `to_object_cose_key`.
+  * **phase_0 test** referenced a non-existent workload-identity-token endpoint
+    and an undefined `client`, and built its OIDC service from a Flask app with
+    no routes. The dead lines were removed, the OIDC service now uses the OIDC
+    fixture, and the middleware wiring was corrected. It is a genuinely
+    unfinished test, now repaired enough to exercise the OIDC middleware path
+    it was written for.
+  * **Race**: re-registering a failed statement reused the content-derived
+    EntryID, and `get_entry_receipt` short-circuited on the stale failure
+    record. A re-registration now clears the stale record, and
+    `_sync_policy_result` ignores policy files older than the current
+    operation file — an external policy engine can have a validation in
+    flight when an attempt is torn down, and its late `denied` file must not
+    be read as this attempt's outcome.
+  * The test server was **single-threaded** (`werkzeug.make_server` default),
+    while Flask's own server is threaded. Signature verification resolves the
+    Issuer's key by fetching it, which may be the service itself; a
+    single-threaded server cannot serve that fetch while handling the request,
+    and the request deadlocked. The test fixture now uses a threaded server.
 
 ## Consequences
 
