@@ -13,24 +13,33 @@ import pycose.headers
 from pycose.messages import Sign1Message
 from flask import Flask, request, send_file, make_response, jsonify
 
+from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE
+from scitt_emulator.errors import encode_problem_details
 from scitt_emulator.tree_algs import TREE_ALGS
 from scitt_emulator.verify_statement import verify_statement
 from scitt_emulator.plugin_helpers import entrypoint_style_load
 from scitt_emulator.scitt import EntryNotFoundError, ClaimInvalidError, OperationNotFoundError
 
 
-def make_error(code: str, msg: str, status_code: int):
-    return make_response(
-        {
-            "type": f"urn:ietf:params:scitt:error:{code}",
-            "detail": msg,
-        },
-        status_code,
+def make_error(title: str, detail: str, status_code: int, headers: dict = None):
+    """
+    Build an error response as an RFC 9290 Concise Problem Details object, as
+    required by Section 2 of draft-ietf-scitt-scrapi-11.
+    """
+    response = make_response(
+        encode_problem_details(title, detail), status_code, headers or {}
     )
+    response.headers["Content-Type"] = PROBLEM_DETAILS_CONTENT_TYPE
+    return response
 
 
 def make_unavailable_error():
-    return make_error("serviceUnavailable", "Service unavailable, try again later", 503)
+    return make_error(
+        "Service Unavailable",
+        "The Transparency Service is unavailable, try again later",
+        503,
+        {"Retry-After": "1"},
+    )
 
 
 def create_flask_app(config):
@@ -86,7 +95,7 @@ def create_flask_app(config):
         try:
             receipt = app.scitt_service.get_receipt(entry_id)
         except EntryNotFoundError as e:
-            return make_error("entryNotFound", str(e), 404)
+            return make_error("Not Found", str(e), 404)
         return send_file(BytesIO(receipt), download_name=f"{entry_id}.receipt.cbor")
 
     @app.route("/entries/<string:entry_id>", methods=["GET"])
@@ -96,7 +105,7 @@ def create_flask_app(config):
         try:
             claim = app.scitt_service.get_claim(entry_id)
         except EntryNotFoundError as e:
-            return make_error("entryNotFound", str(e), 404)
+            return make_error("Not Found", str(e), 404)
         return send_file(BytesIO(claim), download_name=f"{entry_id}.cose")
 
     @app.route("/entries", methods=["POST"])
@@ -118,7 +127,7 @@ def create_flask_app(config):
                 }
                 status_code = 201
         except ClaimInvalidError as e:
-            return make_error("invalidInput", str(e), 400)
+            return make_error("Malformed request", str(e), 400)
         return make_response(result, status_code, headers)
 
     @app.route("/operations/<string:operation_id>", methods=["GET"])
@@ -128,7 +137,7 @@ def create_flask_app(config):
         try:
             operation = app.scitt_service.get_operation(operation_id)
         except OperationNotFoundError as e:
-            return make_error("operationNotFound", str(e), 404)
+            return make_error("Not Found", str(e), 404)
         headers = {}
         if operation["status"] == "running":
             headers["Retry-After"] = "1"
