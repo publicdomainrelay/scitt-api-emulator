@@ -12,7 +12,7 @@ from scitt_emulator import server
 from scitt_emulator.client import describe_error_response
 from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE
 
-from tests.test_cli import Service
+from .test_cli import Service
 
 
 @pytest.fixture

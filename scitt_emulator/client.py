@@ -9,8 +9,7 @@ import time
 import httpx
 
 from scitt_emulator import create_statement
-from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE
-from scitt_emulator.errors import decode_problem_details
+from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE, decode_problem_details
 from scitt_emulator.tree_algs import TREE_ALGS
 
 DEFAULT_URL = "http://127.0.0.1:8000"

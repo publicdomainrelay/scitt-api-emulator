@@ -13,8 +13,7 @@ import pycose.headers
 from pycose.messages import Sign1Message
 from flask import Flask, request, send_file, make_response, jsonify
 
-from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE
-from scitt_emulator.errors import encode_problem_details
+from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE, encode_problem_details
 from scitt_emulator.tree_algs import TREE_ALGS
 from scitt_emulator.verify_statement import verify_statement
 from scitt_emulator.plugin_helpers import entrypoint_style_load

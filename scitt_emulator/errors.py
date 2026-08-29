@@ -12,6 +12,8 @@ Only the two fields SCRAPI requires are used: ``title`` at key -1 and
 
 import cbor2
 
+# Media type for RFC 9290 Concise Problem Details, draft-ietf-scitt-scrapi-11
+# Section 2.
 CONTENT_TYPE = "application/concise-problem-details+cbor"
 
 # RFC 9290 Section 2, "Standard Problem Detail Entries"
