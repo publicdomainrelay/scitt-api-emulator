@@ -22,7 +22,10 @@ from scitt_emulator.did_helpers import DID_JWK_METHOD
 
 @pycose.headers.CoseHeaderAttribute.register_attribute()
 class CWTClaims(pycose.headers.CoseHeaderAttribute):
-    identifier = 14
+    # RFC 9597 registers label 15 for CWT Claims in the COSE Header Parameters
+    # registry. Figure 3 of RFC 9943 requires it in the protected header of
+    # Signed Statements and Receipts.
+    identifier = 15
     fullname = "CWT_CLAIMS"
 
 
@@ -39,9 +42,21 @@ class Receipts(pycose.headers.CoseHeaderAttribute):
 
 
 @pycose.headers.CoseHeaderAttribute.register_attribute()
-class TBD(pycose.headers.CoseHeaderAttribute):
+class VDS(pycose.headers.CoseHeaderAttribute):
+    # Verifiable Data Structure, RFC 9942. Figure 10 of RFC 9943 shows it in
+    # the protected header of a Receipt, identifying the algorithm whose
+    # proofs the Receipt carries.
     identifier = 395
-    fullname = "TBD"
+    fullname = "VERIFIABLE_DATA_STRUCTURE"
+
+
+@pycose.headers.CoseHeaderAttribute.register_attribute()
+class Proofs(pycose.headers.CoseHeaderAttribute):
+    # Verifiable Data structure Proofs, RFC 9942. Figure 9 of RFC 9943 shows
+    # it in the unprotected header of a Receipt, with inclusion proofs at -1
+    # and consistency proofs at -2.
+    identifier = 396
+    fullname = "PROOFS"
 
 
 def create_claim(
@@ -102,7 +117,7 @@ def create_claim(
     if issuer is None:
         issuer = DID_JWK_METHOD + base64.urlsafe_b64encode(key.export_public().encode()).decode()
 
-    # CWT_Claims (label: 14 pending [CWT_CLAIM_COSE]): A CWT representing
+    # CWT_Claims (label: 15, RFC 9597): A CWT representing
     # the Issuer (iss) making the statement, and the Subject (sub) to
     # correlate a collection of statements about an Artifact. Additional
     # [CWT_CLAIMS] MAY be used, while iss and sub MUST be provided
@@ -120,7 +135,6 @@ def create_claim(
         #   * tstr => any
     }
     # }
-    cwt_token = cwt.encode(cwt_claims, cwt_cose_key)
 
     # Protected_Header = {
     protected = {
@@ -135,8 +149,12 @@ def create_claim(
         # Key ID (label: 4): Key ID, as a bytestring
         #   4   => bstr            ; Key ID,
         pycose.headers.KID: kid.encode("ascii"),
-        #   14  => CWT_Claims      ; CBOR Web Token Claims,
-        CWTClaims: cwt_token,
+        #   15  => CWT_Claims      ; CBOR Web Token Claims,
+        # RFC 9597: the value of the CWT Claims header parameter is a CWT
+        # Claims Set, a plain map of claim key to value. Figure 5 of RFC 9943
+        # shows it that way; it is not a nested, separately signed CWT. The
+        # outer COSE_Sign1 signature protects it.
+        CWTClaims: cwt_claims,
         #   393 => Reg_Info        ; Registration Policy info,
         RegInfo: reg_info,
         #   3   => tstr            ; payload type
@@ -146,9 +164,9 @@ def create_claim(
 
     # Unprotected_Header = {
     unprotected = {
-        #   ; TBD, Labels are temporary,
-        TBD: "TBD",
-        #   ? 394 => [+ Receipts]
+        #   ? 394 => [+ bstr .cbor Receipt]
+        # Figure 7 of RFC 9943: a Signed Statement with Receipts in its
+        # unprotected header is a Transparent Statement.
         Receipts: receipts,
     }
     # }
