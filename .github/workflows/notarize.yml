@@ -119,7 +119,7 @@ jobs:
           EOF
           # Start SCITT using the `OIDCAuthMiddleware` and associated config.
           if [[ "x${SCITT_URL}" = "xhttp://localhost:8080" ]]; then
-            scitt-emulator server --port 8080 --workspace workspace/ --tree-alg RFC9162_SHA256 \
+            scitt-emulator server --port 8080 --workspace workspace/ --tree-alg RFC9162_SHA256 --error-rate 0 \
               --middleware scitt_emulator.oidc:OIDCAuthMiddleware \
               --middleware-config-path oidc-middleware-config.json &
             for i in $(seq 1 60); do
