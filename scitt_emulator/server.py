@@ -26,6 +26,7 @@ from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE, 
 from scitt_emulator.tree_algs import TREE_ALGS
 from scitt_emulator.verify_statement import verify_statement
 from scitt_emulator.plugin_helpers import entrypoint_style_load
+from scitt_emulator.rate_limit import RateLimiter, client_identity
 from scitt_emulator.scitt import (
     EntryNotFoundError,
     ClaimInvalidError,
@@ -77,6 +78,13 @@ def create_flask_app(config):
     error_rate = app.config["error_rate"]
     use_lro = app.config["use_lro"]
 
+    # Section 5.3 of draft-ietf-scitt-scrapi-11 requires rate limiting, and
+    # requires a 429 with Retry-After when a client exceeds the limit.
+    rate_limiter = RateLimiter(
+        requests=app.config.get("rate_limit_requests", 0),
+        period=app.config.get("rate_limit_period", 1),
+    )
+
     workspace_path = app.config["workspace"]
     storage_path = workspace_path / "storage"
     os.makedirs(storage_path, exist_ok=True)
@@ -116,6 +124,33 @@ def create_flask_app(config):
             "Internal Server Error",
             "The Transparency Service failed to process the request",
             500,
+        )
+
+    @app.before_request
+    def enforce_rate_limit():
+        """
+        Section 5.3: "When a client exceeds the configured rate limit, the
+        Transparency Service MUST return a 429 response (see Section 2.3.4)
+        including a Retry-After header field."
+
+        Section 5.3 leaves the per-client policy to the implementation and
+        notes it typically varies by whether the client is authenticated, so
+        the limit is applied per bearer token where there is one and per
+        source address otherwise.
+        """
+        if not rate_limiter.requests:
+            return None
+        retry_after = rate_limiter.check(
+            client_identity(request.remote_addr, request.headers.get("Authorization"))
+        )
+        if retry_after is None:
+            return None
+        return make_error(
+            "Too Many Requests",
+            f"Only {rate_limiter.requests} requests per "
+            f"{int(rate_limiter.period)} seconds are allowed.",
+            429,
+            {"Retry-After": str(retry_after)},
         )
 
     def is_unavailable():
@@ -360,6 +395,19 @@ def cli(fn):
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("-p", "--port", type=int, default=8000)
     parser.add_argument("--error-rate", type=float, default=0.01)
+    parser.add_argument(
+        "--rate-limit-requests",
+        type=int,
+        default=0,
+        help="Requests allowed per client per --rate-limit-period, per "
+        "Section 5.3 of draft-ietf-scitt-scrapi-11. 0 disables rate limiting.",
+    )
+    parser.add_argument(
+        "--rate-limit-period",
+        type=float,
+        default=1.0,
+        help="Length in seconds of the rate limit window",
+    )
     parser.add_argument("--use-lro", action="store_true", help="Create operations for submissions")
     parser.add_argument("--tree-alg", required=True, choices=list(TREE_ALGS.keys()))
     parser.add_argument("--workspace", type=Path, default=Path("workspace"))
@@ -379,7 +427,9 @@ def cli(fn):
                 "tree_alg": args.tree_alg,
                 "workspace": args.workspace,
                 "error_rate": args.error_rate,
-                "use_lro": args.use_lro
+                "use_lro": args.use_lro,
+                "rate_limit_requests": args.rate_limit_requests,
+                "rate_limit_period": args.rate_limit_period,
             }
         )
         app.host = args.host
