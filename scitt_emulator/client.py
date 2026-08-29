@@ -116,44 +116,54 @@ def submit_claim(
     entry_id_path: Optional[Path],
     client: HttpClient,
 ):
+    """
+    Register a Signed Statement and retrieve its Receipt, following Section 2.3
+    and Section 2.4 of draft-ietf-scitt-scrapi-11.
+    """
     with open(claim_path, "rb") as f:
         claim = f.read()
 
-    # Submit claim
-    response = client.post(f"{url}/entries", content=claim, headers={
-        "Content-Type": "application/cose"})
+    response = client.post(
+        f"{url}/entries",
+        content=claim,
+        headers={
+            "Content-Type": "application/cose",
+            "Accept": "application/cose",
+        },
+    )
 
-    post_response=response.json()
+    # Section 2.3.1 and Section 2.3.2: the response MUST contain a Location
+    # header field whose value is the URL of the (eventual) Receipt resource.
+    receipt_url = response.headers.get("location")
+    if not receipt_url:
+        raise RuntimeError(
+            f"Registration response with status {response.status_code} has no "
+            f"Location header naming the Receipt resource"
+        )
+    entry_id = receipt_url.rstrip("/").rsplit("/", 1)[-1]
 
     if response.status_code == 201:
-        entry = response.json()
-        entry_id = entry["entryId"]
-
+        # Section 2.3.1: the Receipt is returned directly.
+        receipt = response.content
     elif response.status_code == 202:
-        operation = response.json()
-
-        # Wait for registration to finish
-        while operation["status"] != "succeeded":
+        # Section 2.4: poll the Receipt resource. 204 means registration is
+        # still running; 200 means the Receipt is available. Anything else is
+        # raised by the client's status handling.
+        receipt = None
+        while receipt is None:
             retry_after = int(
                 response.headers.get("retry-after", HTTP_DEFAULT_RETRY_DELAY)
             )
             time.sleep(retry_after)
-            response = client.get(f"{url}/operations/{operation['operationId']}")
-            operation = response.json()
-            raise_for_operation_status(operation)
-
-        entry_id = operation["entryId"]
-
+            response = client.get(receipt_url, headers={"Accept": "application/cose"})
+            if response.status_code == 200:
+                receipt = response.content
     else:
         raise RuntimeError(f"Unexpected status code: {response.status_code}")
 
-    # Fetch receipt
-    response = client.get(f"{url}/entries/{entry_id}/receipt", timeout=15)
-    receipt = response.content
-
     print("Claim Registered:")
-    print(f"  json:     {post_response}")
     print(f"  Entry ID: {entry_id}")
+    print(f"  Receipt:  {receipt_url}")
 
     # Save receipt to file
     with open(receipt_path, "wb") as f:
@@ -170,7 +180,9 @@ def submit_claim(
 
 
 def retrieve_claim(url: str, entry_id: Path, claim_path: Path, client: HttpClient):
-    response = client.get(f"{url}/entries/{entry_id}")
+    # SCRAPI defines no resource for reading back a registered Signed
+    # Statement; this is an emulator extension.
+    response = client.get(f"{url}/entries/{entry_id}/statement")
     claim = response.content
 
     with open(claim_path, "wb") as f:
@@ -180,7 +192,11 @@ def retrieve_claim(url: str, entry_id: Path, claim_path: Path, client: HttpClien
 
 
 def retrieve_receipt(url: str, entry_id: Path, receipt_path: Path, client: HttpClient):
-    response = client.get(f"{url}/entries/{entry_id}/receipt")
+    # Section 2.4 of draft-ietf-scitt-scrapi-11: the entry resource is the
+    # Receipt resource, and may be used at any time to obtain a fresh Receipt.
+    response = client.get(
+        f"{url}/entries/{entry_id}", headers={"Accept": "application/cose"}
+    )
     receipt = response.content
 
     with open(receipt_path, "wb") as f:

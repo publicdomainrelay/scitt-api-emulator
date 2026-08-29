@@ -78,9 +78,24 @@ The proxy server supports 2 options currently:
 
 The service has the following REST API:
 
-- `POST /entries` submit a COSE_Sign1 claim as HTTP body, with a JSON response containing `"entry_id"`
-- `GET /entries/<entry_id>` - retrieve the COSE_Sign1 claim for the corresponding entry id
-- `GET /entries/<entry_id>/receipt` to retrieve the SCITT receipt.
+The service implements the resources defined by
+[draft-ietf-scitt-scrapi-11](https://datatracker.ietf.org/doc/html/draft-ietf-scitt-scrapi-11):
+
+- `GET /.well-known/scitt-keys` - the Receipt verification keys, as a COSE Key Set
+- `GET /.well-known/scitt-keys/<kid_value>` - a single Receipt verification key
+- `POST /entries` - register a COSE_Sign1 Signed Statement sent as the HTTP body. Responds `201` with the Receipt, or `202` if registration will take a while. Either way the `Location` header names the Receipt resource.
+- `GET /entries/<entry_id>` - resolve the Receipt. `200` with the Receipt, `204` while registration is running, or `404` if there is none.
+
+Errors are [RFC 9290](https://www.rfc-editor.org/rfc/rfc9290.html) Concise
+Problem Details objects, served as `application/concise-problem-details+cbor`.
+
+The following resources are emulator extensions or are deprecated, and are not
+part of SCRAPI. See [docs/adrs/](docs/adrs/).
+
+- `GET /entries/<entry_id>/statement` - retrieve the registered COSE_Sign1 Signed Statement. An emulator extension; SCRAPI has no resource for this.
+- `GET /entries/<entry_id>/receipt` - deprecated, superseded by `GET /entries/<entry_id>`
+- `GET /operations/<operation_id>` - deprecated, superseded by polling `GET /entries/<entry_id>`
+- `GET /.well-known/transparency-configuration` - deprecated, superseded by `GET /.well-known/scitt-keys`
 
 **Note:** The `submit-claim` and `retrieve-claim` commands use the default service URL `http://127.0.0.1:8000` which can be changed with the `--url` argument.
 They can be used with the built-in server or an external service implementation.
@@ -156,7 +171,7 @@ It can be used with the built-in server or an external service implementation.
 
 This command sends the following request:
 
-- `GET /entries/<entry_id>/receipt` to retrieve the receipt.
+- `GET /entries/<entry_id>` to retrieve the receipt.
 
 ### Validate Receipts
 

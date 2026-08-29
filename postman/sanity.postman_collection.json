@@ -6,12 +6,114 @@
 	},
 	"item": [
 		{
-			"name": "Submit Claim",
+			"name": "Transparency Service Keys",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"// https://blog.postman.com/adding-external-libraries-in-postman/\r",
+							"globalThis = this;\r",
+							"pm.sendRequest(\"https://cdn.jsdelivr.net/npm/cbor-x@1.5.1/dist/index.min.js\", (err, res) => {\r",
+							"   eval(res.text());   \r",
+							"})"
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"CBOR = globalThis.CBOR;\r",
+							"\r",
+							"const COSEKeyKty = 1;\r",
+							"const COSEKeyKid = 2;\r",
+							"\r",
+							"pm.test(\"COSE Key Set\", function () {\r",
+							"    pm.expect(pm.response.code).to.equal(200);\r",
+							"    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/cbor');\r",
+							"\r",
+							"    // Section 7 of RFC 9052: a COSE Key Set is an array of COSE Keys.\r",
+							"    const keySet = new CBOR.Decoder({mapsAsObjects: false}).decode(pm.response.stream);\r",
+							"    pm.expect(keySet).to.be.an('array').that.is.not.empty;\r",
+							"\r",
+							"    const key = keySet[0];\r",
+							"    pm.expect(key).to.be.instanceof(Map);\r",
+							"    pm.expect(key.get(COSEKeyKty)).to.equal(2); // EC2\r",
+							"    pm.expect(key.get(COSEKeyKid)).to.be.instanceof(Buffer);\r",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/cbor",
+						"type": "default"
+					}
+				],
+				"url": {
+					"raw": "http://127.0.0.1:8000/.well-known/scitt-keys",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "8000",
+					"path": [
+						".well-known",
+						"scitt-keys"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Register Signed Statement",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Registration accepted\", function () {\r",
+							"    // Section 2.3.1 (201, Receipt returned directly) or\r",
+							"    // Section 2.3.2 (202, poll the Receipt resource).\r",
+							"    pm.expect(pm.response.code).to.be.oneOf([201, 202]);\r",
+							"\r",
+							"    // Both MUST carry a Location naming the Receipt resource.\r",
+							"    const location = pm.response.headers.get('Location');\r",
+							"    pm.expect(location).to.be.a('string').that.includes('/entries/');\r",
+							"\r",
+							"    // Section 2.4: the EntryID is the last path segment.\r",
+							"    pm.collectionVariables.set('receiptUrl', location);\r",
+							"    pm.collectionVariables.set('entryId', location.split('/').pop());\r",
+							"\r",
+							"    if (pm.response.code === 201) {\r",
+							"        pm.expect(pm.response.headers.get('Content-Type')).to.include('application/cose');\r",
+							"    }\r",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
 			"request": {
 				"method": "POST",
 				"header": [
 					{
 						"key": "Content-Type",
+						"value": "application/cose",
+						"type": "default"
+					},
+					{
+						"key": "Accept",
 						"value": "application/cose",
 						"type": "default"
 					}
@@ -40,7 +142,49 @@
 			"response": []
 		},
 		{
-			"name": "Retrieve Claim",
+			"name": "Resolve Receipt",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Receipt resolved or still running\", function () {\r",
+							"    // Section 2.4.1 (200, Receipt) or Section 2.4.2 (204, running).\r",
+							"    pm.expect(pm.response.code).to.be.oneOf([200, 204]);\r",
+							"\r",
+							"    if (pm.response.code === 204) {\r",
+							"        pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store');\r",
+							"        return;\r",
+							"    }\r",
+							"\r",
+							"    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/cose');\r",
+							"    pm.expect(pm.response.responseSize).to.be.above(0);\r",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/cose",
+						"type": "default"
+					}
+				],
+				"url": {
+					"raw": "{{receiptUrl}}",
+					"host": [
+						"{{receiptUrl}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Retrieve Signed Statement",
 			"event": [
 				{
 					"listen": "prerequest",
@@ -65,7 +209,9 @@
 							"const COSEAlgorithmLabel = 1;\r",
 							"const COSEContentTypeLabel = 3;\r",
 							"\r",
-							"pm.test(\"Valid Claim response\", function () {\r",
+							"// Note: SCRAPI defines no resource for reading back a registered\r",
+							"// Signed Statement. This is an emulator extension.\r",
+							"pm.test(\"Valid Signed Statement response\", function () {\r",
 							"    pm.expect(pm.response.code).to.be.oneOf([200]);\r",
 							"\r",
 							"    const msg = new CBOR.Decoder({mapsAsObjects: false}).decode(pm.response.stream);\r",
@@ -92,7 +238,7 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "http://127.0.0.1:8000/entries/1",
+					"raw": "http://127.0.0.1:8000/entries/{{entryId}}/statement",
 					"protocol": "http",
 					"host": [
 						"127",
@@ -103,35 +249,22 @@
 					"port": "8000",
 					"path": [
 						"entries",
-						"1"
+						"{{entryId}}",
+						"statement"
 					]
 				}
 			},
 			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "entryId",
+			"value": ""
 		},
 		{
-			"name": "Retrieve Receipt",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "http://127.0.0.1:8000/entries/1/receipt",
-					"protocol": "http",
-					"host": [
-						"127",
-						"0",
-						"0",
-						"1"
-					],
-					"port": "8000",
-					"path": [
-						"entries",
-						"1",
-						"receipt"
-					]
-				}
-			},
-			"response": []
+			"key": "receiptUrl",
+			"value": ""
 		}
 	]
 }
