@@ -42,10 +42,10 @@ jobs:
             echo 'PAYLOAD={"key": "value"}' >> "${GITHUB_ENV}"
           fi
       - uses: actions/checkout@v4
-      - name: Set up Python 3.8
+      - name: Set up Python 3.13
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: 3.13
       - name: Install SCITT API Emulator
         run: |
           pip install -U pip setuptools wheel
@@ -119,10 +119,15 @@ jobs:
           EOF
           # Start SCITT using the `OIDCAuthMiddleware` and associated config.
           if [[ "x${SCITT_URL}" = "xhttp://localhost:8080" ]]; then
-            scitt-emulator server --port 8080 --workspace workspace/ --tree-alg CCF \
+            scitt-emulator server --port 8080 --workspace workspace/ --tree-alg RFC9162_SHA256 \
               --middleware scitt_emulator.oidc:OIDCAuthMiddleware \
               --middleware-config-path oidc-middleware-config.json &
-            sleep 1s
+            for i in $(seq 1 60); do
+              if curl -sf "http://127.0.0.1:8080/.well-known/scitt-keys" > /dev/null; then
+                break
+              fi
+              sleep 1
+            done
           fi
           # Submit the claim using OIDC token as auth
           scitt-emulator client submit-claim --token "${OIDC_TOKEN}" --url "${SCITT_URL}" --claim claim.cose --out claim.receipt.cbor
