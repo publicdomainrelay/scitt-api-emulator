@@ -4,6 +4,7 @@ import urllib.parse
 import urllib.request
 from typing import List, Tuple
 
+import cbor2
 import cwt
 import cwt.algs.ec2
 import pycose
@@ -19,6 +20,64 @@ from scitt_emulator.key_loader_format_did_jwk import to_object_jwk
 
 CONTENT_TYPE = "application/scitt+jwk+set+json"
 
+# Section 2.1 of draft-ietf-scitt-scrapi-11 serves a COSE Key Set as
+# application/cbor.
+COSE_KEY_SET_CONTENT_TYPE = "application/cbor"
+
+# Section 2.1 of draft-ietf-scitt-scrapi-11.
+SCITT_KEYS_PATH = "/.well-known/scitt-keys"
+# Deprecated, from an early SCRAPI revision. Tried only when the current
+# resource is absent, so that a Transparency Service which has not yet been
+# updated still resolves.
+TRANSPARENCY_CONFIGURATION_PATH = "/.well-known/transparency-configuration"
+
+
+def _load_cose_key_set(issuer_parsed_url: urllib.parse.ParseResult) -> List[VerificationKey]:
+    """
+    Resolve the Transparency Service's keys from the COSE Key Set at
+    /.well-known/scitt-keys (Section 2.1 of draft-ietf-scitt-scrapi-11).
+
+    Returns an empty list if the resource is absent or does not hold a COSE
+    Key Set, so that the caller can fall back to the deprecated resource.
+    """
+    scitt_keys_url = issuer_parsed_url._replace(path=SCITT_KEYS_PATH).geturl()
+    request = urllib.request.Request(
+        scitt_keys_url, headers={"Accept": COSE_KEY_SET_CONTENT_TYPE}
+    )
+    # urlopen raises HTTPError, a URLError, for a non-2xx status.
+    try:
+        with urllib.request.urlopen(request) as response:
+            if response.status != 200:
+                return []
+            cose_key_set_bytes = response.read()
+    except urllib.request.URLError:
+        return []
+
+    try:
+        cose_key_set = cbor2.loads(cose_key_set_bytes)
+    except Exception:
+        return []
+    # Section 7 of RFC 9052: a COSE Key Set is an array of COSE Keys.
+    if not isinstance(cose_key_set, list):
+        return []
+
+    keys = []
+    for cose_key in cose_key_set:
+        cose_key_bytes = cbor2.dumps(cose_key)
+        keys.append(
+            VerificationKey(
+                transforms=[cwt.COSEKey.from_bytes(cose_key_bytes)],
+                original=cose_key,
+                original_content_type=COSE_KEY_SET_CONTENT_TYPE,
+                original_bytes=cose_key_bytes,
+                original_bytes_encoding="cbor",
+                usable=False,
+                cwt=None,
+                cose=None,
+            )
+        )
+    return keys
+
 
 def key_loader_format_url_referencing_scitt_scrapi(
     unverified_issuer: str,
@@ -32,10 +91,16 @@ def key_loader_format_url_referencing_scitt_scrapi(
         return keys
 
     # TODO Logging for URLErrors
-    # Check if OIDC issuer
     unverified_issuer_parsed_url = urllib.parse.urlparse(unverified_issuer)
+
+    # Prefer the COSE Key Set resource defined by the current SCRAPI revision.
+    keys = _load_cose_key_set(unverified_issuer_parsed_url)
+    if keys:
+        return keys
+
+    # Fall back to the deprecated transparency configuration resource.
     openid_configuration_url = unverified_issuer_parsed_url._replace(
-        path="/.well-known/transparency-configuration",
+        path=TRANSPARENCY_CONFIGURATION_PATH,
     ).geturl()
     with contextlib.suppress(urllib.request.URLError):
         with urllib.request.urlopen(openid_configuration_url) as response:

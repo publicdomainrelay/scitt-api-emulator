@@ -12,6 +12,7 @@ import cbor2
 from pycose.messages import Sign1Message
 import pycose.headers
 
+from scitt_emulator.cose_keys import COSE_KEY_KID, jwk_to_cose_key
 from scitt_emulator.create_statement import CWTClaims
 
 # temporary receipt header labels, see draft-birkholz-scitt-receipts
@@ -62,6 +63,32 @@ class SCITTServiceEmulator(ABC):
     @abstractmethod
     def keys_as_jwks(self):
         raise NotImplementedError
+
+    def keys_as_cose_key_set(self) -> list:
+        """
+        The Transparency Service's Receipt verification keys as a COSE Key Set,
+        for the resource defined in Section 2.1 of
+        draft-ietf-scitt-scrapi-11.
+
+        Tree algorithms currently expose their keys as JWKs; convert those by
+        default. A tree algorithm whose keys are natively COSE should override
+        this rather than round-tripping through JWK.
+        """
+        return [
+            jwk_to_cose_key(jwk_key_as_dict)
+            for jwk_key_as_dict in self.keys_as_jwks().values()
+        ]
+
+    def key_by_kid(self, kid: bytes):
+        """
+        Resolve a single COSE Key by its kid, for the sub-resource defined in
+        Section 2.2 of draft-ietf-scitt-scrapi-11. Returns None if no key
+        matches.
+        """
+        for cose_key in self.keys_as_cose_key_set():
+            if cose_key.get(COSE_KEY_KID) == kid:
+                return cose_key
+        return None
 
     @abstractmethod
     def create_receipt_contents(self, countersign_tbi: bytes, entry_id: str):
