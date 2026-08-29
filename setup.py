@@ -25,6 +25,7 @@ setup(
         'scitt_emulator.key_helpers.verification_key_to_object': [
             'to_object_jwk=scitt_emulator.key_loader_format_did_jwk:to_object_jwk',
             'to_object_ssh_public=scitt_emulator.key_loader_format_url_referencing_ssh_authorized_keys:to_object_ssh_public',
+            'to_object_cose_key=scitt_emulator.key_loader_format_url_referencing_scitt_scrapi:to_object_cose_key',
         ],
     },
     python_requires=">=3.8",

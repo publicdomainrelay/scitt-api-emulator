@@ -99,6 +99,17 @@ response:
     --rate-limit-requests 100 --rate-limit-period 60
 ```
 
+By default the emulator accepts a Signed Statement without checking its
+signature, for interoperability testing. RFC 9943 Section 6.3 requires a
+Transparency Service to verify it; pass `--verify-signature` to turn that on.
+With it set, the registration errors of Section 2.3.3 of the draft are
+produced: `Bad Signature Algorithm`, `Payload Missing`, and `Rejected` for a
+statement whose signature does not verify against its Issuer's key.
+
+```sh
+./scitt-emulator.sh server --workspace workspace/ --tree-alg RFC9162_SHA256 --verify-signature
+```
+
 The following resources are emulator extensions or are deprecated, and are not
 part of SCRAPI. See [docs/adrs/](docs/adrs/).
 

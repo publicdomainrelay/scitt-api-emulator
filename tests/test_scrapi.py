@@ -437,17 +437,42 @@ def test_invalid_locator(service):
     assert problem_details[-2] == "Operation locator is not in a valid form"
 
 
-def test_malformed_statement_in_asynchronous_mode_reaches_a_terminal_404(tmp_path):
+def test_malformed_statement_is_rejected_in_both_modes(tmp_path):
     """
-    A Signed Statement that cannot be registered at all is the 400 of Section
-    2.3.3 in synchronous mode. In asynchronous mode the request that would
-    have carried it is long gone, so it must become the 404 of Section 2.4.3
-    with detail, and must stay that way rather than failing on every poll.
+    Section 2.3.3's errors are for the registration request itself, so a
+    statement that cannot be processed is a 400 in both registration modes,
+    rather than being accepted and failing later.
     """
+    for use_lro in (False, True):
+        with make_service(tmp_path, use_lro=use_lro) as service:
+            response = httpx.post(
+                f"{service.url}/entries",
+                content=b"not a COSE message",
+                headers={"Content-Type": "application/cose"},
+            )
+            assert response.status_code == 400
+            assert (
+                response.headers["content-type"].split(";")[0].strip()
+                == PROBLEM_DETAILS_CONTENT_TYPE
+            )
+            assert cbor2.loads(response.content)[-1] == "Malformed request"
+
+
+def test_failed_asynchronous_registration_reaches_a_terminal_404(tmp_path):
+    """
+    A statement that passes registration-time validation but cannot be
+    persisted later becomes the 404 of Section 2.4.3 with detail, and stays
+    that way rather than failing on every poll. This statement is a valid
+    COSE_Sign1 with a supported algorithm and a payload, but its CWT Claims
+    are missing, which the log itself rejects.
+    """
+    claim = cbor2.dumps(
+        cbor2.CBORTag(18, [cbor2.dumps({1: -7}), {}, b"payload", b"signature"])
+    )
     with make_service(tmp_path, use_lro=True) as service:
         response = httpx.post(
             f"{service.url}/entries",
-            content=b"not a COSE message",
+            content=claim,
             headers={"Content-Type": "application/cose"},
         )
         assert response.status_code == 202

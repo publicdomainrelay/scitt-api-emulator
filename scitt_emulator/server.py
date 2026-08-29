@@ -33,6 +33,9 @@ from scitt_emulator.scitt import (
     OperationNotFoundError,
     RegistrationFailedError,
     RegistrationRunningError,
+    PayloadMissingError,
+    SignatureVerificationError,
+    UnsupportedAlgorithmError,
 )
 
 # Section 2.3 of draft-ietf-scitt-scrapi-11: Signed Statements and Receipts are
@@ -96,6 +99,13 @@ def create_flask_app(config):
         storage_path=storage_path, service_parameters_path=app.service_parameters_path
     )
     app.scitt_service.initialize_service()
+    # RFC 9943 Section 6.3 requires the Transparency Service to verify the
+    # Signed Statement's signature at registration. The emulator's default is
+    # permissive, for interoperability testing; --verify-signature turns the
+    # verification on.
+    app.scitt_service.service_parameters["verifySignature"] = app.config.get(
+        "verify_signature", False
+    )
     print(f"Service parameters: {app.service_parameters_path}")
 
     @app.errorhandler(HTTPException)
@@ -340,6 +350,12 @@ def create_flask_app(config):
             result = app.scitt_service.submit_claim(
                 request.get_data(), long_running=use_lro
             )
+        except PayloadMissingError as e:
+            return make_error("Payload Missing", str(e), 400)
+        except UnsupportedAlgorithmError as e:
+            return make_error("Bad Signature Algorithm", str(e), 400)
+        except SignatureVerificationError as e:
+            return make_error("Rejected", str(e), 400)
         except ClaimInvalidError as e:
             return make_error("Malformed request", str(e), 400)
 
@@ -418,6 +434,12 @@ def cli(fn):
         default=[],
     )
     parser.add_argument("--middleware-config-path", type=Path, nargs="*", default=[])
+    parser.add_argument(
+        "--verify-signature",
+        action="store_true",
+        help="Verify each Signed Statement's signature at registration, per "
+        "Section 6.3 of RFC 9943",
+    )
 
     def cmd(args):
         app = create_flask_app(
@@ -430,6 +452,7 @@ def cli(fn):
                 "use_lro": args.use_lro,
                 "rate_limit_requests": args.rate_limit_requests,
                 "rate_limit_period": args.rate_limit_period,
+                "verify_signature": args.verify_signature,
             }
         )
         app.host = args.host

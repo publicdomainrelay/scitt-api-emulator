@@ -17,3 +17,4 @@ that replaces it.
 | [0006](0006-serialize-registration.md) | Serialize registration, and make it idempotent on the EntryID | Accepted |
 | [0007](0007-conformance-details.md) | Close the remaining format and identifier conformance gaps | Accepted |
 | [0008](0008-operational-considerations.md) | Implement Section 5, Operational Considerations | Accepted |
+| [0009](0009-signature-verification.md) | Verify Signed Statement signatures at registration | Accepted |

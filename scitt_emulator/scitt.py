@@ -38,6 +38,23 @@ class ClaimInvalidError(Exception):
     pass
 
 
+class PayloadMissingError(ClaimInvalidError):
+    """Section 2.3.3 of draft-ietf-scitt-scrapi-11: "Payload Missing"."""
+
+
+class UnsupportedAlgorithmError(ClaimInvalidError):
+    """Section 2.3.3: "Bad Signature Algorithm"."""
+
+
+class SignatureVerificationError(ClaimInvalidError):
+    """Section 2.3.3: "Rejected". The Signed Statement is not accepted."""
+
+
+# COSE algorithm identifiers the emulator can verify, Section 2.3.3 "Bad
+# Signature Algorithm". ES256 (-7), ES384 (-35), ES512 (-36), EdDSA (-8).
+SUPPORTED_SIGNATURE_ALGORITHMS = {-7, -35, -36, -8}
+
+
 class EntryNotFoundError(Exception):
     pass
 
@@ -233,6 +250,14 @@ class SCITTServiceEmulator(ABC):
         insert_policy = self.service_parameters.get("insertPolicy", DEFAULT_INSERT_POLICY)
         entry_id = entry_id_for_claim(claim)
 
+        # Section 2.3 of draft-ietf-scitt-scrapi-11: "The Registration Policy
+        # for the Transparency Service MUST be applied before any additional
+        # processing." Validating the Signed Statement here, before either an
+        # entry or an operation is created, is what lets a bad statement get
+        # the 400 of Section 2.3.3 in both registration modes rather than
+        # surfacing only later.
+        self._validate_submission(claim)
+
         if long_running:
             return self._create_operation(claim, entry_id)
         elif insert_policy != MOST_PERMISSIVE_INSERT_POLICY:
@@ -260,6 +285,11 @@ class SCITTServiceEmulator(ABC):
             print(f"Entry {entry_id} is already registered")
             return {"entryId": entry_id}
 
+        # A prior attempt may have failed (a policy denial, for instance) and
+        # left a failure record behind. This registration is a fresh attempt
+        # at the same EntryID, so the stale record must not block it.
+        self.operations_path.joinpath(f"{entry_id}.failed.json").unlink(missing_ok=True)
+
         self._create_receipt(claim, entry_id)
 
         claim_path = self.storage_path / f"{entry_id}.cose"
@@ -269,9 +299,72 @@ class SCITTServiceEmulator(ABC):
 
         return {"entryId": entry_id}
 
+    def _validate_submission(self, claim: bytes):
+        """
+        Validate a Signed Statement before it is registered.
+
+        Section 2.3.3 of draft-ietf-scitt-scrapi-11 defines the "Payload
+        Missing", "Bad Signature Algorithm", and "Rejected" errors. The
+        structural checks here always run; signature verification runs when
+        the service is configured to require it (see RFC 9943 Section 6.3).
+        """
+        try:
+            msg = Sign1Message.decode(claim, tag=True)
+        except Exception as error:
+            raise ClaimInvalidError("Claim is not a valid COSE_Sign1 message") from error
+        if not isinstance(msg, Sign1Message):
+            raise ClaimInvalidError("Claim is not a COSE_Sign1 message")
+
+        # Section 2.3: Signed Statements MAY use detached payloads when the
+        # Transparency Service has access to the payload. This emulator has no
+        # mechanism for that, so the payload must be present.
+        if msg.payload is None:
+            raise PayloadMissingError("Signed Statement payload must be present")
+
+        # pycose gives back an Algorithm object; its identifier is the COSE
+        # registered integer.
+        algorithm = msg.phdr.get(pycose.headers.Algorithm)
+        algorithm_id = getattr(algorithm, "identifier", algorithm)
+        if algorithm_id not in SUPPORTED_SIGNATURE_ALGORITHMS:
+            raise UnsupportedAlgorithmError(
+                f"Signed Statement contained a non-supported algorithm: {algorithm!r}"
+            )
+
+        if self.service_parameters.get("verifySignature"):
+            self._verify_signed_statement(msg)
+
+    def _verify_signed_statement(self, msg: Sign1Message):
+        """
+        Verify the Signed Statement's signature with the Issuer's key, as
+        RFC 9943 Section 6.3 requires: "The TS MUST perform signature
+        verification per Section 4.4 of RFC 9052 and MUST verify the signature
+        of the Signed Statement with the signature algorithm and verification
+        key of the Issuer per [RFC9360]."
+
+        The Issuer's key is resolved from the iss claim of the CWT Claims, the
+        same way the Registration Policy resolves it.
+        """
+        from scitt_emulator.verify_statement import verify_statement
+
+        try:
+            verification_key = verify_statement(msg)
+        except Exception as error:
+            raise SignatureVerificationError(
+                f"Could not verify the Signed Statement signature: {error}"
+            ) from error
+        if verification_key is None:
+            raise SignatureVerificationError(
+                "Signed Statement signature could not be verified with the "
+                "Issuer's key"
+            )
+
     def _create_operation(self, claim: bytes, entry_id: str) -> dict:
         operation_path = self.operations_path / f"{entry_id}.json"
         claim_path = self.operations_path / f"{entry_id}.cose"
+
+        # A prior attempt at this EntryID may have failed and left a failure
+        # record behind; this is a fresh attempt, so clear it.
+        self.operations_path.joinpath(f"{entry_id}.failed.json").unlink(missing_ok=True)
 
         operation = {
             "operationId": entry_id,
@@ -383,6 +476,24 @@ class SCITTServiceEmulator(ABC):
         policy_denied_path = self.operations_path / f"{operation_id}.policy.denied"
         policy_failed_path = self.operations_path / f"{operation_id}.policy.failed"
         insert_policy = self.service_parameters.get("insertPolicy", DEFAULT_INSERT_POLICY)
+
+        # The EntryID is derived from the Signed Statement, so a later attempt
+        # at the same entry reuses it. A policy file written for a previous
+        # attempt can still be on disk (an external policy engine may have had
+        # a validation in flight when the attempt was consumed and torn down).
+        # The current operation file is newer than any such leftover, so only
+        # policy files at least as new as it belong to this attempt.
+        operation_path = self.operations_path / f"{operation_id}.json"
+        operation_mtime_ns = (
+            operation_path.stat().st_mtime_ns if operation_path.exists() else 0
+        )
+        for policy_path in (
+            policy_insert_path,
+            policy_failed_path,
+            policy_denied_path,
+        ):
+            if policy_path.exists() and policy_path.stat().st_mtime_ns < operation_mtime_ns:
+                policy_path.unlink(missing_ok=True)
 
         policy_result = {"status": operation["status"]}
 

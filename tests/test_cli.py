@@ -34,7 +34,12 @@ class Service:
         if hasattr(app, "service_parameters_path"):
             self.service_parameters_path = app.service_parameters_path
         self.host = "127.0.0.1"
-        self.server = make_server(self.host, 0, app)
+        # Threaded, matching Flask's own server. The emulator verifies a
+        # Signed Statement's signature during registration, and resolves the
+        # Issuer's key by fetching it, which may be this very service; a
+        # single-threaded server could not serve that fetch while handling
+        # the request.
+        self.server = make_server(self.host, 0, app, threaded=True)
         port = self.server.port
         self.url = f"http://{self.host}:{port}"
         app.url = self.url

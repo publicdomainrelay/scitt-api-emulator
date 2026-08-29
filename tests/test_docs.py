@@ -21,9 +21,10 @@ import docutils.utils
 from flask import Flask
 
 import jwcrypto
+import jwt
 
-from scitt_emulator.client import ClaimOperationError
 from scitt_emulator.did_helpers import url_to_did_web
+from scitt_emulator.oidc import OIDCAuthMiddleware
 
 from .test_cli import (
     Service,
@@ -39,20 +40,6 @@ repo_root = pathlib.Path(__file__).parents[1]
 docs_dir = repo_root.joinpath("docs")
 non_allowlisted_issuer = "did:web:denied.example.com"
 CLAIM_DENIED_ERROR = {"type": "denied", "detail": "content_address_of_reason"}
-CLAIM_DENIED_ERROR_BLOCKED = {
-    "type": "denied",
-    "detail": textwrap.dedent(
-        """
-        'did:web:denied.example.com' is not one of ['did:web:example.org']
-
-        Failed validating 'enum' in schema['properties']['issuer']:
-            {'enum': ['did:web:example.org'], 'type': 'string'}
-
-        On instance['issuer']:
-            'did:web:denied.example.com'
-        """
-    ).lstrip(),
-}
 
 
 class SimpleFileBasedPolicyEngine:
@@ -255,13 +242,9 @@ def test_docs_registration_policies(create_flask_app_notary_identity, tmp_path):
         execute_cli(command)
         assert os.path.exists(claim_path)
 
-        # replace example issuer with test OIDC service issuer (URL) in error
-        claim_denied_error_blocked = copy.deepcopy(CLAIM_DENIED_ERROR_BLOCKED)
-        claim_denied_error_blocked["detail"] = claim_denied_error_blocked["detail"].replace(
-            "did:web:denied.example.com", issuer,
-        )
-
-        # submit denied claim
+        # submit denied claim. The policy rejects it, which the client sees as
+        # the 404 of Section 2.4.3 of draft-ietf-scitt-scrapi-11, with detail
+        # explaining why.
         command = [
             "client",
             "submit-claim",
@@ -277,12 +260,11 @@ def test_docs_registration_policies(create_flask_app_notary_identity, tmp_path):
         check_error = None
         try:
             execute_cli(command)
-        except ClaimOperationError as error:
+        except RuntimeError as error:
             check_error = error
         assert check_error
-        assert "error" in check_error.operation
-        if check_error.operation["error"] != claim_denied_error_blocked:
-            raise check_error
+        assert "Registration Failed" in str(check_error)
+        assert issuer in str(check_error)
         assert not os.path.exists(receipt_path)
         assert not os.path.exists(entry_id_path)
 
@@ -311,7 +293,7 @@ def test_docs_registration_policies(create_flask_app_notary_identity, tmp_path):
         assert os.path.exists(receipt_path)
         receipt_path.unlink()
         assert os.path.exists(entry_id_path)
-        receipt_path.unlink(entry_id_path)
+        entry_id_path.unlink()
 
 
 def test_phase_0_relying_party_workload_identity_token_response(tmp_path):
@@ -327,15 +309,9 @@ def test_phase_0_relying_party_workload_identity_token_response(tmp_path):
     audience = "scitt.example.org"
     subject = "repo:scitt-community/scitt-api-emulator:ref:refs/heads/main"
 
-    relying_party_workload_identity_token_response = client.post("/v1/token/{scitt.config.fqdn}/scitt_entry_submission_token")
-    relying_party_workload_identity_token = relying_party_workload_identity_token_response["token"]
-    # We can then use the tokens issued with the same SCITT service as the audience
-    # TODO scitt.config.fqdn TODO
-
-
     with Service(
         {"key": key, "algorithms": [algorithm]},
-        create_flask_app=create_flask_app_nop_scitt_scrapi,
+        create_flask_app=create_flask_app_oidc_server,
     ) as oidc_service:
         os.environ["no_proxy"] = ",".join(
             os.environ.get("no_proxy", "").split(",") + [oidc_service.host]
@@ -360,8 +336,8 @@ def test_phase_0_relying_party_workload_identity_token_response(tmp_path):
         )
         with Service(
             {
-                "middleware": [OIDCAuthMiddleware],
-                "middleware_config_path": [middleware_config_path],
+                "middleware": OIDCAuthMiddleware,
+                "middleware_config_path": middleware_config_path,
                 "tree_alg": "CCF",
                 "workspace": workspace_path,
                 "error_rate": 0.1,
