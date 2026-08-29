@@ -36,6 +36,7 @@ from scitt_emulator.rfc9162_sha256 import (
 from tests.test_cli import Service
 
 
+# The sub used in test Signed Statements.
 SUBJECT = "vendor.product.example"
 
 

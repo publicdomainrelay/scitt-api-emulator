@@ -61,6 +61,7 @@ CWT_CLAIM_SUB = 2
 # COSE algorithm identifier for ECDSA with SHA-256.
 COSE_ALG_ES256 = -7
 
+# COSE_Sign1 CBOR tag, RFC 9052 Section 4.2.
 COSE_SIGN1_TAG = 18
 
 # RFC 9162 Section 2.1.1 domain separation prefixes.
@@ -132,7 +133,9 @@ def inclusion_proof_path(leaves: List[bytes], index: int) -> List[bytes]:
     2
     """
     if not 0 <= index < len(leaves):
-        raise IndexError(f"Leaf index {index} outside tree of size {len(leaves)}")
+        raise ReceiptInvalidError(
+            f"Leaf index {index} outside tree of size {len(leaves)}"
+        )
     if len(leaves) == 1:
         return []
     k = _split_point(len(leaves))

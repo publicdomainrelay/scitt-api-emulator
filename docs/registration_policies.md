@@ -86,7 +86,6 @@ import json
 import pathlib
 import unittest
 
-import cwt
 import pycose
 from pycose.messages import Sign1Message
 from jsonschema import validate, ValidationError

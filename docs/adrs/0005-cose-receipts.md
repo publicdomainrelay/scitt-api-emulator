@@ -10,7 +10,7 @@ Accepted
 
 Section 7 of [RFC 9943][rfc9943] specifies what a Receipt is:
 
-> Receipts are based on signed proofs as described in COSE Receipts [RFC9942],
+> Receipts are based on signed proofs as described in COSE Receipts [RFC 9942][rfc9942],
 > which also provides the COSE header parameter semantics for label 394.
 
 Figures 9, 10, and 11 show the shape. A Receipt is a tagged `COSE_Sign1` whose
@@ -100,3 +100,4 @@ root as the detached payload.
 
 [rfc9943]: https://www.rfc-editor.org/rfc/rfc9943.html
 [rfc9597]: https://www.rfc-editor.org/rfc/rfc9597.html
+[rfc9942]: https://www.rfc-editor.org/rfc/rfc9942.html
