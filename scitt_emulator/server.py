@@ -13,6 +13,13 @@ import pycose.headers
 from pycose.messages import Sign1Message
 from flask import Flask, request, send_file, make_response, jsonify
 
+from scitt_emulator.cose_keys import CONTENT_TYPE as COSE_KEY_CONTENT_TYPE
+from scitt_emulator.cose_keys import (
+    COSE_KEY_KID,
+    base64url_decode,
+    encode_cose_key,
+    encode_cose_key_set,
+)
 from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE, encode_problem_details
 from scitt_emulator.tree_algs import TREE_ALGS
 from scitt_emulator.verify_statement import verify_statement
@@ -70,11 +77,66 @@ def create_flask_app(config):
     def is_unavailable():
         return random.random() <= error_rate
 
-    @app.route("/.well-known/transparency-configuration", methods=["GET"])
-    def get_transparency_configuration():
+    @app.route("/.well-known/scitt-keys", methods=["GET"])
+    def get_scitt_keys():
+        """
+        Section 2.1 of draft-ietf-scitt-scrapi-11: discover the public keys
+        relying parties use to verify Receipts issued by this Transparency
+        Service, as a COSE Key Set serialized as application/cbor.
+        """
         if is_unavailable():
             return make_unavailable_error()
-        return jsonify(
+        cose_key_set = app.scitt_service.keys_as_cose_key_set()
+        response = make_response(encode_cose_key_set(cose_key_set), 200)
+        response.headers["Content-Type"] = COSE_KEY_CONTENT_TYPE
+        return response
+
+    @app.route("/.well-known/scitt-keys/<string:kid_value>", methods=["GET"])
+    def get_scitt_key(kid_value: str):
+        """
+        Section 2.2 of draft-ietf-scitt-scrapi-11: resolve a single COSE Key
+        from a kid value contained in a previously issued Receipt.
+
+        The base64url form of the kid is always accepted. The raw kid is also
+        accepted when it is safe as a URI path segment, and both forms
+        identify the same key.
+        """
+        if is_unavailable():
+            return make_unavailable_error()
+
+        candidate_kids = [kid_value.encode("utf-8")]
+        try:
+            candidate_kids.append(base64url_decode(kid_value))
+        except Exception:
+            pass
+
+        cose_key = None
+        for candidate_kid in candidate_kids:
+            cose_key = app.scitt_service.key_by_kid(candidate_kid)
+            if cose_key is not None:
+                break
+
+        if cose_key is None:
+            return make_error(
+                "No such key", "No key could be found for this kid value", 404
+            )
+
+        response = make_response(encode_cose_key(cose_key), 200)
+        response.headers["Content-Type"] = COSE_KEY_CONTENT_TYPE
+        return response
+
+    @app.route("/.well-known/transparency-configuration", methods=["GET"])
+    def get_transparency_configuration():
+        """
+        Deprecated. This resource comes from an early SCRAPI revision and no
+        longer appears in draft-ietf-scitt-scrapi-11, which replaced it with
+        the COSE Key Set at /.well-known/scitt-keys. It is kept for existing
+        consumers of the emulator and will be removed once SCRAPI is
+        published. See docs/adrs/0003-cose-key-set-key-discovery.md.
+        """
+        if is_unavailable():
+            return make_unavailable_error()
+        response = jsonify(
             {
                  "issuer": "/",
                  "registration_endpoint": f"/entries",
@@ -86,6 +148,9 @@ def create_flask_app(config):
                  }
             }
         )
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = '</.well-known/scitt-keys>; rel="successor-version"'
+        return response
 
     @app.route("/entries/<string:entry_id>/receipt", methods=["GET"])
     def get_receipt(entry_id: str):
