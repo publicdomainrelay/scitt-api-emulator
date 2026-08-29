@@ -81,6 +81,17 @@ def entry_id_for_claim(claim: bytes) -> str:
     return base64url_encode(sha256(claim).digest())
 
 
+def _failure_detail(operation: dict, entry_id: str) -> str:
+    error = operation.get("error")
+    if isinstance(error, dict):
+        detail = error.get("detail")
+        if detail:
+            return str(detail)
+    if error:
+        return str(error)
+    return f"Signed Statement with entry ID {entry_id} could not be persisted to the log"
+
+
 class SCITTServiceEmulator(ABC):
     def __init__(
         self, service_parameters_path: Path, storage_path: Optional[Path] = None
@@ -272,19 +283,8 @@ class SCITTServiceEmulator(ABC):
         if operation["status"] == "running":
             raise RegistrationRunningError(entry_id)
         raise RegistrationFailedError(
-            self._failure_detail(operation, entry_id)
+            _failure_detail(operation, entry_id)
         )
-
-    @staticmethod
-    def _failure_detail(operation: dict, entry_id: str) -> str:
-        error = operation.get("error")
-        if isinstance(error, dict):
-            detail = error.get("detail")
-            if detail:
-                return str(detail)
-        if error:
-            return str(error)
-        return f"Signed Statement with entry ID {entry_id} could not be persisted to the log"
 
     def _sync_policy_result(self, operation: dict):
         operation_id = operation["entryId"]
@@ -339,7 +339,7 @@ class SCITTServiceEmulator(ABC):
             # not complete, so the reason has to outlive the operation.
             failure_path = self.operations_path / f"{entry_id}.failed.json"
             failure_path.write_text(
-                json.dumps({"detail": self._failure_detail(operation, entry_id)})
+                json.dumps({"detail": _failure_detail(operation, entry_id)})
             )
             operation_path.unlink()
             claim_src_path.unlink()

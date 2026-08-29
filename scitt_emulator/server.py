@@ -25,8 +25,8 @@ from scitt_emulator.tree_algs import TREE_ALGS
 from scitt_emulator.verify_statement import verify_statement
 from scitt_emulator.plugin_helpers import entrypoint_style_load
 from scitt_emulator.scitt import (
-    ClaimInvalidError,
     EntryNotFoundError,
+    ClaimInvalidError,
     OperationNotFoundError,
     RegistrationFailedError,
     RegistrationRunningError,
@@ -202,6 +202,7 @@ def create_flask_app(config):
 
     @app.route("/entries/<string:entry_id>", methods=["GET"])
     def get_entry_receipt(entry_id: str):
+        """Section 2.4 of draft-ietf-scitt-scrapi-11, Resolve Receipt."""
         if is_unavailable():
             return make_unavailable_error()
         return resolve_receipt(entry_id)

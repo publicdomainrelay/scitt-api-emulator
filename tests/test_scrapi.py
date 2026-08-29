@@ -11,9 +11,7 @@ import cbor2
 import httpx
 import pytest
 
-from scitt_emulator import create_statement
-
-from scitt_emulator import server
+from scitt_emulator import create_statement, server
 from scitt_emulator.client import describe_error_response
 from scitt_emulator.cose_keys import (
     COSE_KEY_EC2_CRV,
