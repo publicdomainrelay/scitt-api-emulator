@@ -3,6 +3,7 @@
 
 import os
 import json
+import re
 from pathlib import Path
 from io import BytesIO
 import random
@@ -12,6 +13,7 @@ import jwcrypto.jwt
 import pycose.headers
 from pycose.messages import Sign1Message
 from flask import Flask, request, send_file, make_response, jsonify
+from werkzeug.exceptions import HTTPException
 
 from scitt_emulator.cose_keys import CONTENT_TYPE as COSE_KEY_CONTENT_TYPE
 from scitt_emulator.cose_keys import (
@@ -58,6 +60,10 @@ def make_unavailable_error():
     )
 
 
+# EntryID path segments are unpadded base64url, Section 2.4 of draft-ietf-scitt-scrapi-11.
+ENTRY_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
 def create_flask_app(config):
     app = Flask(__name__)
 
@@ -84,8 +90,37 @@ def create_flask_app(config):
     app.scitt_service.initialize_service()
     print(f"Service parameters: {app.service_parameters_path}")
 
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(error: HTTPException):
+        """
+        Section 2 of draft-ietf-scitt-scrapi-11: the body of any 4xx or 5xx
+        response MUST be a Concise Problem Details object. Flask generates
+        HTML for unrouted paths, rejected methods and the like, so those are
+        converted here rather than only in the handlers.
+        """
+        return make_error(
+            error.name,
+            error.description or error.name,
+            error.code or 500,
+        )
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_exception(error: Exception):
+        """
+        An unhandled failure is still a 5xx whose body MUST be a Concise
+        Problem Details object. The detail is deliberately generic; the
+        traceback goes to the log, not to the client.
+        """
+        app.logger.exception("Unhandled error serving %s", request.path)
+        return make_error(
+            "Internal Server Error",
+            "The Transparency Service failed to process the request",
+            500,
+        )
+
     def is_unavailable():
-        return random.random() <= error_rate
+        # Strictly less than, so that --error-rate 0 never fails.
+        return random.random() < error_rate
 
     def receipt_url(entry_id: str) -> str:
         """
@@ -177,6 +212,11 @@ def create_flask_app(config):
         registration is still in progress, and 404 if no Receipt exists for
         the EntryID, including when registration has failed.
         """
+        if not ENTRY_ID_RE.match(entry_id):
+            # Section 2.3.3 of draft-ietf-scitt-scrapi-11 defines this error.
+            return make_error(
+                "Invalid locator", "Operation locator is not in a valid form", 400
+            )
         try:
             receipt = app.scitt_service.get_entry_receipt(entry_id)
         except RegistrationRunningError:
@@ -233,6 +273,10 @@ def create_flask_app(config):
         """
         if is_unavailable():
             return make_unavailable_error()
+        if not ENTRY_ID_RE.match(entry_id):
+            return make_error(
+                "Invalid locator", "Operation locator is not in a valid form", 400
+            )
         try:
             claim = app.scitt_service.get_claim(entry_id)
         except EntryNotFoundError as e:
@@ -286,6 +330,10 @@ def create_flask_app(config):
         """
         if is_unavailable():
             return make_unavailable_error()
+        if not ENTRY_ID_RE.match(operation_id):
+            return make_error(
+                "Invalid locator", "Operation locator is not in a valid form", 400
+            )
         try:
             operation = app.scitt_service.get_operation(operation_id)
         except OperationNotFoundError as e:

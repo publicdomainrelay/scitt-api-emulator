@@ -3,8 +3,11 @@
 
 from typing import Optional
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from pathlib import Path
 from hashlib import sha256
+import fcntl
+import threading
 import time
 import json
 import uuid
@@ -99,13 +102,35 @@ class SCITTServiceEmulator(ABC):
         self.storage_path = storage_path
         self.service_parameters_path = service_parameters_path
 
+        # Registration mutates state that is shared across requests: the
+        # operation records here, and the Merkle tree in tree algorithms that
+        # keep one. The server is threaded, so those transitions are
+        # serialized. The lock file makes this hold across processes too, for
+        # anyone running the emulator under a multi-process WSGI server.
+        self._registration_lock = threading.Lock()
+
         if storage_path is not None:
             self.operations_path = storage_path / "operations"
             self.operations_path.mkdir(exist_ok=True)
+            self._registration_lock_path = storage_path / ".registration.lock"
 
         if self.service_parameters_path.exists():
             with open(self.service_parameters_path) as f:
                 self.service_parameters = json.load(f)
+
+    @contextmanager
+    def registration_lock(self):
+        """
+        Serialize the state transitions of registration: appending to the log,
+        deciding an operation's outcome, and writing a Receipt.
+        """
+        with self._registration_lock:
+            with open(self._registration_lock_path, "a+") as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
 
     @abstractmethod
     def initialize_service(self):
@@ -205,10 +230,26 @@ class SCITTServiceEmulator(ABC):
                 f"non-* insertPolicy only works with long_running=True: {insert_policy!r}"
             )
         else:
-            entry = self._create_entry(claim, entry_id)
+            with self.registration_lock():
+                entry = self._create_entry(claim, entry_id)
             return {**entry, "status": "succeeded"}
 
     def _create_entry(self, claim: bytes, entry_id: str) -> dict:
+        """
+        Register a Signed Statement under its EntryID. Callers hold the
+        registration lock.
+
+        Registration is idempotent on the EntryID. The EntryID is derived from
+        the Signed Statement, so re-registering the same bytes names the same
+        Receipt resource; appending a second leaf for it would mean the
+        resource silently changed which leaf it proves, and would let any
+        client grow the log without bound by replaying one statement.
+        """
+        receipt_path = self.storage_path / f"{entry_id}.receipt.cbor"
+        if receipt_path.exists():
+            print(f"Entry {entry_id} is already registered")
+            return {"entryId": entry_id}
+
         self._create_receipt(claim, entry_id)
 
         claim_path = self.storage_path / f"{entry_id}.cose"
@@ -266,25 +307,65 @@ class SCITTServiceEmulator(ABC):
                 f"Transparency Service"
             )
 
-        operation = json.loads(operation_path.read_text())
+        with self.registration_lock():
+            # Re-check under the lock: another request may have finished this
+            # registration between the checks above and here.
+            if receipt_path.exists():
+                return receipt_path.read_bytes()
+            if failure_path.exists():
+                failure = json.loads(failure_path.read_text())
+                raise RegistrationFailedError(
+                    failure.get("detail", f"Registration of entry {entry_id} failed")
+                )
+            if not operation_path.exists():
+                raise EntryNotFoundError(
+                    f"Receipt with entry ID {entry_id} not known to this "
+                    f"Transparency Service"
+                )
 
-        if not operation.get("polled"):
-            # Pretend that the service takes some time to reach finality, so
-            # that clients exercise the 204 path of Section 2.4.2 rather than
-            # always seeing a Receipt on the first poll.
-            operation["polled"] = True
-            operation_path.write_text(json.dumps(operation))
-            raise RegistrationRunningError(entry_id)
+            operation = json.loads(operation_path.read_text())
 
-        operation = self._finish_operation(operation)
+            if not operation.get("polled"):
+                # Pretend that the service takes some time to reach finality,
+                # so that clients exercise the 204 path of Section 2.4.2
+                # rather than always seeing a Receipt on the first poll.
+                operation["polled"] = True
+                operation_path.write_text(json.dumps(operation))
+                raise RegistrationRunningError(entry_id)
 
-        if operation["status"] == "succeeded":
-            return receipt_path.read_bytes()
-        if operation["status"] == "running":
-            raise RegistrationRunningError(entry_id)
-        raise RegistrationFailedError(
-            _failure_detail(operation, entry_id)
-        )
+            try:
+                operation = self._finish_operation(operation)
+            except ClaimInvalidError as error:
+                # The Signed Statement cannot be registered at all. In
+                # synchronous mode this is the 400 of Section 2.3.3, but the
+                # request that would have carried it is long gone, so record
+                # the failure and report it as the 404 of Section 2.4.3.
+                self._record_failure(entry_id, str(error))
+                raise RegistrationFailedError(str(error)) from error
+
+            if operation["status"] == "succeeded":
+                return receipt_path.read_bytes()
+            if operation["status"] == "running":
+                raise RegistrationRunningError(entry_id)
+            raise RegistrationFailedError(
+                _failure_detail(operation, entry_id)
+            )
+
+    def _record_failure(self, entry_id: str, detail: str):
+        """
+        Record why a registration failed, and tear down its operation.
+
+        Section 2.4.3 of draft-ietf-scitt-scrapi-11 permits the 404 for a
+        failed registration to carry detail explaining why it did not
+        complete, so the reason has to outlive the operation.
+        """
+        failure_path = self.operations_path / f"{entry_id}.failed.json"
+        failure_path.write_text(json.dumps({"detail": detail}))
+        for path in (
+            self.operations_path / f"{entry_id}.json",
+            self.operations_path / f"{entry_id}.cose",
+        ):
+            path.unlink(missing_ok=True)
 
     def _sync_policy_result(self, operation: dict):
         operation_id = operation["entryId"]
@@ -337,17 +418,14 @@ class SCITTServiceEmulator(ABC):
             # draft-ietf-scitt-scrapi-11 permits the 404 for a failed
             # registration to be enriched with detail explaining why it did
             # not complete, so the reason has to outlive the operation.
-            failure_path = self.operations_path / f"{entry_id}.failed.json"
-            failure_path.write_text(
-                json.dumps({"detail": _failure_detail(operation, entry_id)})
+            self._record_failure(
+                entry_id, _failure_detail(operation, entry_id)
             )
-            operation_path.unlink()
-            claim_src_path.unlink()
             return operation
 
         claim = claim_src_path.read_bytes()
         entry = self._create_entry(claim, entry_id)
-        claim_src_path.unlink()
+        claim_src_path.unlink(missing_ok=True)
 
         operation["status"] = "succeeded"
         operation["entryId"] = entry["entryId"]

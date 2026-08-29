@@ -14,3 +14,4 @@ that replaces it.
 | [0003](0003-cose-key-set-key-discovery.md) | Discover Receipt verification keys as a COSE Key Set | Accepted |
 | [0004](0004-registration-and-receipt-resolution.md) | Poll the Receipt resource instead of an operation | Accepted |
 | [0005](0005-cose-receipts.md) | Issue COSE Sign1 Receipts carrying RFC 9162 inclusion proofs | Accepted |
+| [0006](0006-serialize-registration.md) | Serialize registration, and make it idempotent on the EntryID | Accepted |

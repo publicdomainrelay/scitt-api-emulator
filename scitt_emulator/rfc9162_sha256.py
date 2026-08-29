@@ -30,6 +30,8 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from scitt_emulator.cose_keys import (
+    COSE_KEY_CRV_P256,
+    COSE_KEY_EC2_CRV,
     COSE_KEY_EC2_X,
     COSE_KEY_EC2_Y,
     COSE_KEY_KID,
@@ -70,6 +72,10 @@ INTERIOR_PREFIX = b"\x01"
 
 
 class ReceiptInvalidError(Exception):
+    pass
+
+
+class UnsupportedServiceKeyError(Exception):
     pass
 
 
@@ -303,8 +309,24 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
             return cbor2.loads(base64url_decode(encoded))
         return self._cose_key_from_private_key()
 
+    def _require_p256(self, cose_key: dict):
+        """
+        This service signs Receipts with ES256. RFC 9053 Section 2.1 ties
+        ES256 to P-256, and the signature encoding below assumes 32-byte
+        coordinates, so a key on another curve is rejected rather than
+        silently mis-encoded.
+        """
+        crv = cose_key.get(COSE_KEY_EC2_CRV)
+        if crv != COSE_KEY_CRV_P256:
+            raise UnsupportedServiceKeyError(
+                f"This Transparency Service signs Receipts with ES256, which "
+                f"requires a P-256 key (COSE curve {COSE_KEY_CRV_P256}); the "
+                f"configured key is on COSE curve {crv!r}"
+            )
+
     def _public_key(self):
         cose_key = self._cose_key()
+        self._require_p256(cose_key)
         return ec.EllipticCurvePublicNumbers(
             int.from_bytes(cose_key[COSE_KEY_EC2_X], "big"),
             int.from_bytes(cose_key[COSE_KEY_EC2_Y], "big"),
@@ -326,10 +348,20 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
             if line
         ]
 
-    def _append_leaf(self, leaf: bytes) -> int:
+    def _append_leaf(self, leaf: bytes) -> List[bytes]:
+        """
+        Append a leaf and return the tree including it.
+
+        The caller holds the registration lock, so the append and the read
+        back are one transition. Returning the leaves rather than an index
+        means the index, the inclusion proof, and the root are all derived
+        from a single snapshot: deriving them from separate reads let a
+        concurrent registration shift the tree underneath, producing a Receipt
+        whose proof reconstructs a different root and so never verifies.
+        """
         with open(self._leaves_path, "a") as f:
             f.write(leaf.hex() + "\n")
-        return len(self._leaves()) - 1
+        return self._leaves()
 
     def _create_receipt(self, claim: bytes, entry_id: str):
         # The Registration Policy is applied before this point; here the
@@ -337,10 +369,11 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
         # requires before it becomes a leaf.
         self._validate_signed_statement(claim)
 
-        # The leaf commits to the Signed Statement as registered.
+        # The leaf commits to the Signed Statement as registered. Callers hold
+        # the registration lock, so appending and proving are one transition.
         leaf = leaf_hash(claim)
-        leaf_index = self._append_leaf(leaf)
-        leaves = self._leaves()
+        leaves = self._append_leaf(leaf)
+        leaf_index = len(leaves) - 1
 
         receipt = self._sign_receipt(claim, leaves, leaf_index)
 
@@ -391,6 +424,8 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
         tree_size = len(leaves)
         root = merkle_tree_hash(leaves)
         path = inclusion_proof_path(leaves, leaf_index)
+
+        self._require_p256(self._cose_key())
 
         cwt_claims = {
             CWT_CLAIM_ISS: self.service_parameters.get("issuer", "transparency.example"),
