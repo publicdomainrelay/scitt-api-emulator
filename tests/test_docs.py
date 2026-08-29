@@ -456,52 +456,56 @@ def test_phase_0_relying_party_workload_identity_token_response(tmp_path):
     #   If glob validating all subjects ensure PolicyEngineRequest schema
     #   receipt URN is in ignore list so it doesn't run on it's TCB which it
     #   already determined was insert worthy.
-    oidc_auth_middleware_config = {
-          {
-              "issuers": ["https://{scitt_service.url}"],
-              "claim_schema": {
-                  "https://token.actions.githubusercontent.com": {
-                        "\$schema": "https://json-schema.org/draft/2020-12/schema",
-                        "required": [
-                            "job_workflow_ref",
-                            "job_workflow_sha",
-                            "repository_owner_id",
-                            "repository_id"
-                        ],
-                        "properties": {
-                            "job_workflow_ref": {
-                                "type": "string",
-                                "enum": [
-                                    "${WORKFLOW_REF}"
-                                ]
-                            },
-                            "job_workflow_sha": {
-                                "type": "string",
-                                "enum": [
-                                    "${JOB_WORKFLOW_SHA}"
-                                ]
-                            },
-                            "repository_owner_id": {
-                                "type": "string",
-                                "enum": [
-                                    "${REPOSITORY_OWNER_ID}"
-                                ]
-                            },
-                            "repository_id": {
-                                "type": "string",
-                                "enum": [
-                                    "${REPOSITORY_ID}"
-                                ]
-                            }
-                        }
-                    }
-              },
-              "audience": "${SCITT_URL}"
+    # TODO Unfinished sketch of the phase 0 relying party flow. It is kept
+    # here as a comment because it is not valid Python and prevented this
+    # module from being collected at all. Restore it as code when the flow
+    # is implemented.
+    # oidc_auth_middleware_config = {
+    # {
+    # "issuers": ["https://{scitt_service.url}"],
+    # "claim_schema": {
+    # "https://token.actions.githubusercontent.com": {
+    # "\$schema": "https://json-schema.org/draft/2020-12/schema",
+    # "required": [
+    # "job_workflow_ref",
+    # "job_workflow_sha",
+    # "repository_owner_id",
+    # "repository_id"
+    # ],
+    # "properties": {
+    # "job_workflow_ref": {
+    # "type": "string",
+    # "enum": [
+    # "${WORKFLOW_REF}"
+    # ]
+    # },
+    # "job_workflow_sha": {
+    # "type": "string",
+    # "enum": [
+    # "${JOB_WORKFLOW_SHA}"
+    # ]
+    # },
+    # "repository_owner_id": {
+    # "type": "string",
+    # "enum": [
+    # "${REPOSITORY_OWNER_ID}"
+    # ]
+    # },
+    # "repository_id": {
+    # "type": "string",
+    # "enum": [
+    # "${REPOSITORY_ID}"
+    # ]
+    # }
+    # }
+    # }
+    # },
+    # "audience": "${SCITT_URL}"
 
-    }
-    oidc_auth_middleware_config_path = tempdir_path.joinpath("config.json")
-    oidc_auth_middleware_config_path.write_text(json.dump())
-    oidc = OIDCAuthMiddleware(app, )
-    claims = oidc.validate_token(relying_party_workload_identity_token)
-    if "claim_schema" in self.config and claims["iss"] in oidc.config["claim_schema"]:
-        jsonschema.validate(claims, schema=oidc.config["claim_schema"][claims["iss"]])
+    # }
+    # oidc_auth_middleware_config_path = tempdir_path.joinpath("config.json")
+    # oidc_auth_middleware_config_path.write_text(json.dump())
+    # oidc = OIDCAuthMiddleware(app, )
+    # claims = oidc.validate_token(relying_party_workload_identity_token)
+    # if "claim_schema" in self.config and claims["iss"] in oidc.config["claim_schema"]:
+    # jsonschema.validate(claims, schema=oidc.config["claim_schema"][claims["iss"]])
