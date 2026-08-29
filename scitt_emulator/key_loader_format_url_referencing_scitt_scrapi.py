@@ -2,7 +2,7 @@ import json
 import contextlib
 import urllib.parse
 import urllib.request
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import cbor2
 import cwt
@@ -13,6 +13,15 @@ import pycose.keys.ec2
 # TODO Remove this once we have a example flow for proper key verification
 import jwcrypto.jwk
 
+from scitt_emulator.cose_keys import (
+    COSE_KEY_EC2_CRV,
+    COSE_KEY_EC2_X,
+    COSE_KEY_EC2_Y,
+    COSE_KEY_KID,
+    COSE_KEY_KTY,
+    COSE_KEY_TYPE_EC2,
+    base64url_encode,
+)
 from scitt_emulator.did_helpers import did_web_to_url
 from scitt_emulator.key_helper_dataclasses import VerificationKey
 from scitt_emulator.key_loader_format_did_jwk import to_object_jwk
@@ -135,3 +144,35 @@ def transform_key_instance_jwcrypto_jwk_to_cwt_cose(
         key.export_to_pem(),
         kid=key.thumbprint(),
     )
+
+
+def to_object_cose_key(verification_key: VerificationKey) -> Optional[dict]:
+    """
+    Convert a VerificationKey that came from a COSE Key Set into a JWK object,
+    so that a Registration Policy can use a key discovered from
+    /.well-known/scitt-keys. Returns None when the key did not come from a
+    COSE Key Set, so this runs alongside the other key-to-object transforms.
+    """
+    if verification_key.original_content_type != COSE_KEY_SET_CONTENT_TYPE:
+        return
+    cose_key = verification_key.original
+    if cose_key.get(COSE_KEY_KTY) != COSE_KEY_TYPE_EC2:
+        return
+    crv = {
+        1: "P-256",
+        2: "P-384",
+        3: "P-521",
+    }.get(cose_key.get(COSE_KEY_EC2_CRV))
+    if crv is None:
+        return
+    return {
+        "content_type": verification_key.original_content_type,
+        "key": {
+            "kty": "EC",
+            "crv": crv,
+            "x": base64url_encode(cose_key[COSE_KEY_EC2_X]),
+            "y": base64url_encode(cose_key[COSE_KEY_EC2_Y]),
+            "use": "sig",
+            "kid": base64url_encode(cose_key[COSE_KEY_KID]),
+        },
+    }
