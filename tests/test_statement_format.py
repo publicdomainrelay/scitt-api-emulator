@@ -3,8 +3,6 @@
 """
 Signed Statement structure, against the CDDL of Figure 3 of RFC 9943.
 """
-import pathlib
-
 import cbor2
 import pytest
 

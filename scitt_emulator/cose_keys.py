@@ -185,7 +185,7 @@ def jwk_to_cose_key(jwk: dict) -> dict:
     for coordinate in ("x", "y"):
         if not jwk.get(coordinate):
             raise UnsupportedKeyTypeError(
-                f"EC JWK is missing its {coordinate} coordinate"
+                f"EC JWK is missing its {coordinate!r} coordinate"
             )
     cose_key = {
         COSE_KEY_KTY: COSE_KEY_TYPE_EC2,
