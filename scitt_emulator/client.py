@@ -23,6 +23,7 @@ HTTP_RETRIES = 3
 # apply exponential backoff with jitter, cap the total number of retries, and
 # avoid synchronizing retries across clients."
 HTTP_DEFAULT_RETRY_DELAY = 1
+# Upper bound on the backoff, regardless of attempts.
 HTTP_MAX_RETRY_DELAY = 32
 # Section 5.1 constrains clients that retry; it does not oblige a client to
 # retry at all. When the service asks for a longer wait than this, retrying
@@ -33,6 +34,69 @@ HTTP_MAX_RETRY_AFTER_WAIT = 30
 # The cap on polling a registration to completion. Registration latency is
 # unbounded in principle, so this is a client policy, not a protocol limit.
 REGISTRATION_POLL_ATTEMPTS = 20
+
+
+# Section 2 of draft-ietf-scitt-scrapi-11: clients MUST be prepared to handle
+# any HTTP status code by falling back to the generic class semantics of the
+# response, and MUST rely on the RFC 9290 Concise Problem Details object (when
+# present) rather than the status code alone.
+HTTP_STATUS_CLASS_SEMANTICS = {
+    1: "Informational",
+    2: "Successful",
+    3: "Redirection",
+    4: "Client Error",
+    5: "Server Error",
+}
+
+
+class ClaimOperationError(Exception):
+    def __init__(self, operation):
+        self.operation = operation
+
+    def __str__(self):
+        error_type = self.operation.get("error", {}).get(
+            "type", "error.type not present",
+        )
+        error_detail = self.operation.get("error", {}).get(
+            "detail", "error.detail not present",
+        )
+        return f"Operation error {error_type}: {error_detail}"
+
+
+def describe_error_response(response: httpx.Response) -> str:
+    """
+    Describe an error response, preferring the Concise Problem Details object
+    over the status code, and falling back to the status code's class when the
+    body is absent or not a valid problem details object.
+    """
+    status_class = HTTP_STATUS_CLASS_SEMANTICS.get(
+        response.status_code // 100, "Unknown"
+    )
+    described = f"HTTP {response.status_code} ({status_class})"
+    content_type = response.headers.get("content-type", "")
+    if content_type.split(";")[0].strip() == PROBLEM_DETAILS_CONTENT_TYPE:
+        try:
+            problem_details = decode_problem_details(response.content)
+        except ValueError:
+            pass
+        else:
+            title = problem_details.get("title", "")
+            detail = problem_details.get("detail", "")
+            return f"{described}: {title}: {detail}".rstrip(": ")
+    return described
+
+
+def raise_for_status(response: httpx.Response):
+    if response.is_success:
+        return
+    raise RuntimeError(describe_error_response(response))
+
+
+def raise_for_operation_status(operation: dict):
+    if operation["status"] != "failed":
+        return
+    raise ClaimOperationError(operation)
+
 
 
 def retry_after_seconds(response: httpx.Response) -> Optional[float]:
@@ -80,67 +144,6 @@ def worth_retrying(response: httpx.Response) -> bool:
     retry_after = retry_after_seconds(response)
     return retry_after is None or retry_after <= HTTP_MAX_RETRY_AFTER_WAIT
 
-
-class ClaimOperationError(Exception):
-    def __init__(self, operation):
-        self.operation = operation
-
-    def __str__(self):
-        error_type = self.operation.get("error", {}).get(
-            "type", "error.type not present",
-        )
-        error_detail = self.operation.get("error", {}).get(
-            "detail", "error.detail not present",
-        )
-        return f"Operation error {error_type}: {error_detail}"
-
-
-# Section 2 of draft-ietf-scitt-scrapi-11: clients MUST be prepared to handle
-# any HTTP status code by falling back to the generic class semantics of the
-# response, and MUST rely on the RFC 9290 Concise Problem Details object (when
-# present) rather than the status code alone.
-HTTP_STATUS_CLASS_SEMANTICS = {
-    1: "Informational",
-    2: "Successful",
-    3: "Redirection",
-    4: "Client Error",
-    5: "Server Error",
-}
-
-
-def describe_error_response(response: httpx.Response) -> str:
-    """
-    Describe an error response, preferring the Concise Problem Details object
-    over the status code, and falling back to the status code's class when the
-    body is absent or not a valid problem details object.
-    """
-    status_class = HTTP_STATUS_CLASS_SEMANTICS.get(
-        response.status_code // 100, "Unknown"
-    )
-    described = f"HTTP {response.status_code} ({status_class})"
-    content_type = response.headers.get("content-type", "")
-    if content_type.split(";")[0].strip() == PROBLEM_DETAILS_CONTENT_TYPE:
-        try:
-            problem_details = decode_problem_details(response.content)
-        except ValueError:
-            pass
-        else:
-            title = problem_details.get("title", "")
-            detail = problem_details.get("detail", "")
-            return f"{described}: {title}: {detail}".rstrip(": ")
-    return described
-
-
-def raise_for_status(response: httpx.Response):
-    if response.is_success:
-        return
-    raise RuntimeError(describe_error_response(response))
-
-
-def raise_for_operation_status(operation: dict):
-    if operation["status"] != "failed":
-        return
-    raise ClaimOperationError(operation)
 
 
 class HttpClient:
@@ -228,7 +231,7 @@ def submit_claim(
         if receipt is None:
             raise RuntimeError(
                 f"Registration did not complete after "
-                f"{REGISTRATION_POLL_ATTEMPTS} polls of {receipt_url}"
+                f"{REGISTRATION_POLL_ATTEMPTS} polls of {receipt_url!r}"
             )
     else:
         raise RuntimeError(f"Unexpected status code: {response.status_code}")

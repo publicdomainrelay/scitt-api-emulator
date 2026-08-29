@@ -15,7 +15,7 @@ gracefully at a window boundary.
 
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Optional
 
 
 class RateLimiter:

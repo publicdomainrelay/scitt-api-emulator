@@ -41,7 +41,7 @@ raised.
 
 ## Decision
 
-**Implement rate limiting as a fixed window counter**, off by default and
+**Implement rate limiting as a fixed window counter, in `scitt_emulator/rate_limit.py` (`RateLimiter`, `client_identity`)**, off by default and
 enabled with `--rate-limit-requests` / `--rate-limit-period`. Exceeding it
 returns the `429` of Section 2.3.4 — Concise Problem Details, title "Too Many
 Requests", detail naming the limit — with `Retry-After` set to the remainder
@@ -58,7 +58,7 @@ boundary; that is acceptable here for the same reason.
 address otherwise, following Section 5.3's note that the policy "typically
 varies with whether and how clients are authenticated".
 
-**Give the client real backoff.** `retry_delay` honors `Retry-After` as a
+**Give the client real backoff**, in `scitt_emulator/client.py` (`retry_delay`, `worth_retrying`, `REGISTRATION_POLL_ATTEMPTS`). `retry_delay` honors `Retry-After` as a
 minimum when the service sends one it can parse, and otherwise applies a
 doubling backoff with full jitter, capped. Full jitter — a uniform draw over
 `[0, backoff]` rather than a fixed delay — is what satisfies "avoid
