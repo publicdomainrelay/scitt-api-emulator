@@ -4,6 +4,7 @@
 from typing import Optional
 from pathlib import Path
 import json
+import random
 import time
 
 import httpx
@@ -15,7 +16,69 @@ from scitt_emulator.tree_algs import TREE_ALGS
 DEFAULT_URL = "http://127.0.0.1:8000"
 CONNECT_RETRIES = 3
 HTTP_RETRIES = 3
+
+# Section 5.1 of draft-ietf-scitt-scrapi-11: "Clients that retry a request
+# MUST honor any Retry-After header field ... treating it as a minimum
+# interval before retrying. In its absence, clients that retry a request MUST
+# apply exponential backoff with jitter, cap the total number of retries, and
+# avoid synchronizing retries across clients."
 HTTP_DEFAULT_RETRY_DELAY = 1
+HTTP_MAX_RETRY_DELAY = 32
+# Section 5.1 constrains clients that retry; it does not oblige a client to
+# retry at all. When the service asks for a longer wait than this, retrying
+# would just block the caller, so the error is reported and the caller decides
+# whether to come back. Honoring Retry-After as a minimum means never sleeping
+# less than it asks, not sleeping arbitrarily long.
+HTTP_MAX_RETRY_AFTER_WAIT = 30
+# The cap on polling a registration to completion. Registration latency is
+# unbounded in principle, so this is a client policy, not a protocol limit.
+REGISTRATION_POLL_ATTEMPTS = 20
+
+
+def retry_after_seconds(response: httpx.Response) -> Optional[float]:
+    """
+    The Retry-After interval the service asked for, if it sent one this client
+    can parse.
+
+    Retry-After may also be an HTTP-date, which this client does not parse;
+    None is returned so the caller backs off rather than retrying at once.
+    """
+    retry_after = response.headers.get("retry-after")
+    if retry_after is None:
+        return None
+    try:
+        return max(0.0, float(int(retry_after)))
+    except ValueError:
+        return None
+
+
+def retry_delay(response: httpx.Response, attempt: int) -> float:
+    """
+    How long to wait before retrying, per Section 5.1.
+
+    Retry-After is honored as a minimum interval when the service sends one.
+    Otherwise the delay doubles per attempt, and full jitter is applied so
+    that clients retrying against the same service do not synchronize.
+    """
+    retry_after = retry_after_seconds(response)
+    if retry_after is not None:
+        return retry_after
+    backoff = min(HTTP_DEFAULT_RETRY_DELAY * (2 ** attempt), HTTP_MAX_RETRY_DELAY)
+    return random.uniform(0, backoff)
+
+
+def worth_retrying(response: httpx.Response) -> bool:
+    """
+    Whether to retry at all.
+
+    Section 5.1 constrains a client that retries; it does not require one to.
+    A service asking for a longer wait than this client is willing to block
+    for is better reported than slept through.
+    """
+    if response.status_code not in HttpClient.RETRIABLE_STATUS_CODES:
+        return False
+    retry_after = retry_after_seconds(response)
+    return retry_after is None or retry_after <= HTTP_MAX_RETRY_AFTER_WAIT
 
 
 class ClaimOperationError(Exception):
@@ -89,15 +152,18 @@ class HttpClient:
         transport = httpx.HTTPTransport(retries=CONNECT_RETRIES, verify=verify)
         self.client = httpx.Client(transport=transport, headers=headers)
 
+    # Section 2 of draft-ietf-scitt-scrapi-11 has clients fall back to the
+    # generic class semantics of a status code. 503 is retried because
+    # Section 15.6.4 of RFC 9110 makes it transient; 429 is retried because
+    # Section 5.3 defines it as the service asking the client to slow down.
+    RETRIABLE_STATUS_CODES = (429, 503)
+
     def _request(self, *args, **kwargs):
         response = self.client.request(*args, **kwargs)
-        retries = HTTP_RETRIES
-        while retries >= 0 and response.status_code == 503:
-            retries -= 1
-            retry_after = int(
-                response.headers.get("retry-after", HTTP_DEFAULT_RETRY_DELAY)
-            )
-            time.sleep(retry_after)
+        for attempt in range(HTTP_RETRIES):
+            if not worth_retrying(response):
+                break
+            time.sleep(retry_delay(response, attempt))
             response = self.client.request(*args, **kwargs)
         raise_for_status(response)
         return response
@@ -149,15 +215,21 @@ def submit_claim(
         # Section 2.4: poll the Receipt resource. 204 means registration is
         # still running; 200 means the Receipt is available. Anything else is
         # raised by the client's status handling.
+        # Section 5.1 requires a cap on the total number of retries, so
+        # polling does not continue indefinitely against a service that never
+        # reaches finality.
         receipt = None
-        while receipt is None:
-            retry_after = int(
-                response.headers.get("retry-after", HTTP_DEFAULT_RETRY_DELAY)
-            )
-            time.sleep(retry_after)
+        for attempt in range(REGISTRATION_POLL_ATTEMPTS):
+            time.sleep(retry_delay(response, attempt))
             response = client.get(receipt_url, headers={"Accept": "application/cose"})
             if response.status_code == 200:
                 receipt = response.content
+                break
+        if receipt is None:
+            raise RuntimeError(
+                f"Registration did not complete after "
+                f"{REGISTRATION_POLL_ATTEMPTS} polls of {receipt_url}"
+            )
     else:
         raise RuntimeError(f"Unexpected status code: {response.status_code}")
 

@@ -90,6 +90,15 @@ The service implements the resources defined by
 Errors are [RFC 9290](https://www.rfc-editor.org/rfc/rfc9290.html) Concise
 Problem Details objects, served as `application/concise-problem-details+cbor`.
 
+Rate limiting, required by Section 5.3 of the draft, is off by default. Enable
+it with `--rate-limit-requests` and `--rate-limit-period` to exercise the `429`
+response:
+
+```sh
+./scitt-emulator.sh server --workspace workspace/ --tree-alg RFC9162_SHA256 \
+    --rate-limit-requests 100 --rate-limit-period 60
+```
+
 The following resources are emulator extensions or are deprecated, and are not
 part of SCRAPI. See [docs/adrs/](docs/adrs/).
 
