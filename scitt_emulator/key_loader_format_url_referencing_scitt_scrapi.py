@@ -24,6 +24,7 @@ CONTENT_TYPE = "application/scitt+jwk+set+json"
 # application/cbor.
 COSE_KEY_SET_CONTENT_TYPE = "application/cbor"
 
+# Section 2.1 of draft-ietf-scitt-scrapi-11.
 SCITT_KEYS_PATH = "/.well-known/scitt-keys"
 # Deprecated, from an early SCRAPI revision. Tried only when the current
 # resource is absent, so that a Transparency Service which has not yet been
@@ -31,7 +32,7 @@ SCITT_KEYS_PATH = "/.well-known/scitt-keys"
 TRANSPARENCY_CONFIGURATION_PATH = "/.well-known/transparency-configuration"
 
 
-def _load_cose_key_set(issuer_parsed_url) -> List[VerificationKey]:
+def _load_cose_key_set(issuer_parsed_url: urllib.parse.ParseResult) -> List[VerificationKey]:
     """
     Resolve the Transparency Service's keys from the COSE Key Set at
     /.well-known/scitt-keys (Section 2.1 of draft-ietf-scitt-scrapi-11).

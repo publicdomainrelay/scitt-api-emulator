@@ -266,7 +266,7 @@ $ cat private-key.pem | python -c 'import sys, json, jwcrypto.jwt; key = jwcrypt
 
 Keys are discovered via making an HTTP GET request to the URL given by the
 `issuer` parameter with `/.well-known/scitt-keys` as the path component. The
-response body is a COSE Key Set, as defined in Section 7 of [RFC 9052][rfc9052]
+response body is a COSE Key Set, as defined in Section 7 of [RFC 9052](https://www.rfc-editor.org/rfc/rfc9052.html)
 and served as `application/cbor`.
 
 - [`https://transparency.example/.well-known/scitt-keys`](https://datatracker.ietf.org/doc/html/draft-ietf-scitt-scrapi-11#name-transparency-service-keys)
@@ -275,7 +275,7 @@ A single key can be resolved from the `kid` in a Receipt at
 `/.well-known/scitt-keys/{kid_value}`, where `{kid_value}` is the base64url
 encoding of the `kid` without padding.
 
-- [`https://transparency.example/.well-known/scitt-keys/{kid_value}`](https://datatracker.ietf.org/doc/html/draft-ietf-scitt-scrapi-11#name-individual-transparency-serv)
+- [`https://transparency.example/.well-known/scitt-keys/{kid_value}`](https://datatracker.ietf.org/doc/html/draft-ietf-scitt-scrapi-11#name-individual-transparency-ser)
 
 If `/.well-known/scitt-keys` is absent, resolution falls back to the deprecated
 `/.well-known/transparency-configuration` resource, which returns JSON with the
@@ -283,7 +283,6 @@ public keys in its `jwks.keys` array. That resource is from an early SCRAPI
 revision and no longer appears in the document; see
 [ADR 0003](adrs/0003-cose-key-set-key-discovery.md).
 
-[rfc9052]: https://www.rfc-editor.org/rfc/rfc9052.html
 
 To use this method of resolution create the statement using the FQDN of the
 SCITT SCRAPI service as the issuer. Also ensure you use it's private key to

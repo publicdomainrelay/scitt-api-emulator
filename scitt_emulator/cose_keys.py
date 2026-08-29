@@ -8,7 +8,7 @@ specified by RFC 9679.
 
 import base64
 import hashlib
-from typing import List
+from typing import Any, List
 
 import cbor2
 
@@ -31,6 +31,7 @@ COSE_KEY_CRV_P256 = 1
 COSE_KEY_CRV_P384 = 2
 COSE_KEY_CRV_P521 = 3
 
+# JOSE/JWK curve names to COSE EC2 crv labels, RFC 9053 Table 18.
 JWK_CRV_TO_COSE_KEY_CRV = {
     "P-256": COSE_KEY_CRV_P256,
     "P-384": COSE_KEY_CRV_P384,
@@ -74,7 +75,7 @@ def base64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + padding)
 
 
-def cose_key_thumbprint(cose_key: dict, hash_alg=hashlib.sha256) -> bytes:
+def cose_key_thumbprint(cose_key: dict, hash_alg: Any = hashlib.sha256) -> bytes:
     """
     Compute the RFC 9679 COSE Key Thumbprint of a COSE Key.
 
@@ -95,7 +96,7 @@ def cose_key_thumbprint(cose_key: dict, hash_alg=hashlib.sha256) -> bytes:
     for label in required_labels:
         if label not in cose_key:
             raise UnsupportedKeyTypeError(
-                f"COSE key of type {kty} is missing required label {label}"
+                f"COSE key of type {kty!r} is missing required label {label!r}"
             )
         required[label] = cose_key[label]
     # cbor2's canonical encoding is the deterministic encoding of RFC 8949
