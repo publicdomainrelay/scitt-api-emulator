@@ -50,8 +50,8 @@ without padding, so it is safe as a URI path segment. This satisfies Section
 2.3.1 with no shared state between the two registration paths — both modes
 compute the same ID from the same bytes — and it removes the sequential
 counter, which was a source of ordering dependence between otherwise unrelated
-registrations. The tree algorithms take the EntryID as opaque data (CCF hashes
-it into the leaf), so nothing needed a sequential index.
+registrations. The tree algorithm takes the EntryID as opaque data, so nothing
+needed a sequential index.
 
 Re-registering the same Signed Statement now resolves to the same EntryID,
 which is a behaviour change but a defensible one: the Receipt resource is
@@ -81,10 +81,7 @@ mark it as an emulator extension. SCRAPI defines no such resource, but the
 bundled client and the interoperability tests need to read back what was
 registered, and `/entries/{entryId}` is now the Receipt.
 
-**Deprecate rather than delete** `/operations/{operationId}` and
-`/entries/{entryId}/receipt`. Both keep working, now serving from the new
-storage layout, and both carry `Deprecation: true` and a `Link` header naming
-their successor. They are removed once SCRAPI is published.
+**Remove** `/operations/{operationId}` and `/entries/{entryId}/receipt`.
 
 ## Consequences
 
@@ -97,15 +94,8 @@ their successor. They are removed once SCRAPI is published.
   `workspace/storage/operations/*.cose` and writes
   `{stem}.policy.{insert,denied,failed}` beside each, keyed off the filename
   stem whatever it is, so it is unaffected.
-* The RKVST tree algorithm overrides `submit_claim`, `get_operation`,
-  `get_claim`, and `get_receipt` with its own SaaS-backed implementations, and
-  is **not** updated to the new flow. Its `archivist` client library is
-  unpublished, so the module cannot be imported or tested here (see
-  [ADR 0001](0001-align-with-rfc-9943-and-scrapi.md)). Bringing it forward
-  needs someone who can run it against the service.
 * Receipts are served as `application/cose`, which is what Section 2.4 says
-  they are. The bytes are still the emulator's bespoke CCF structure rather
-  than a COSE Sign1 Receipt; that is the subject of the next change in this
-  series.
+  they are. The bytes are COSE Sign1 Receipts carrying RFC 9162 inclusion
+  proofs; that is the subject of the next change in this series.
 
 [scrapi]: https://datatracker.ietf.org/doc/draft-ietf-scitt-scrapi/11/

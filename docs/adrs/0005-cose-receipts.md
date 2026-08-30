@@ -45,17 +45,11 @@ two format problems in Signed Statements themselves:
 ## Decision
 
 **Add an `RFC9162_SHA256` tree algorithm** in
-`scitt_emulator/rfc9162_sha256.py`, and make it the first entry in
-`TREE_ALGS`. It maintains an RFC 9162 Merkle tree (`SHA-256(0x00 || leaf)` for
-leaves, `SHA-256(0x01 || left || right)` for interior nodes) over the
-registered Signed Statements, and issues Receipts in the shape above. Leaf
-hashes are persisted in registration order, which is enough to recompute any
-root or inclusion proof.
-
-**Leave `CCF` in place, and do not rewrite it.** It remains selectable for
-anyone testing against the structure it produces, and the two algorithms do not
-interfere. Rewriting it would mean changing what `CCF` means rather than adding
-what the specification describes.
+`scitt_emulator/rfc9162_sha256.py`. It maintains an RFC 9162 Merkle tree
+(`SHA-256(0x00 || leaf)` for leaves, `SHA-256(0x01 || left || right)` for
+interior nodes) over the registered Signed Statements, and issues Receipts in
+the shape above. Leaf hashes are persisted in registration order, which is
+enough to recompute any root or inclusion proof.
 
 **Move CWT Claims to label 15 and make the value a plain CWT Claims Set.**
 Reading the issuer no longer means decoding a nested COSE structure — it is a

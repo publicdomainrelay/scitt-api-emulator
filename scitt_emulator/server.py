@@ -12,7 +12,7 @@ import jwt.api_jwt
 import jwcrypto.jwt
 import pycose.headers
 from pycose.messages import Sign1Message
-from flask import Flask, request, send_file, make_response, jsonify
+from flask import Flask, request, send_file, make_response
 from werkzeug.exceptions import HTTPException
 
 from scitt_emulator.cose_keys import CONTENT_TYPE as COSE_KEY_CONTENT_TYPE
