@@ -19,7 +19,7 @@ Start the server
 ```console
 $ rm -rf workspace/
 $ mkdir -p workspace/storage/operations
-$ timeout 1s scitt-emulator server --workspace workspace/ --tree-alg CCF --use-lro
+$ timeout 1s scitt-emulator server --workspace workspace/ --use-lro
 Service parameters: workspace/service_parameters.json
 ^C
 ```
@@ -33,9 +33,10 @@ $ echo "$(cat workspace/service_parameters.json)" \
     && mv workspace/service_parameters.json.new workspace/service_parameters.json
 {
   "serviceId": "emulator",
-  "treeAlgorithm": "CCF",
+  "treeAlgorithm": "RFC9162_SHA256",
   "signatureAlgorithm": "ES256",
-  "serviceCertificate": "-----BEGIN CERTIFICATE-----",
+  "issuer": "transparency.example",
+  "serviceCoseKey": "-----base64url COSE Key-----",
   "insertPolicy": "allowlist.schema.json"
 }
 ```
@@ -171,7 +172,7 @@ $ npm install nodemon && \
 Also ensure you restart the server with the new config we edited.
 
 ```console
-$ scitt-emulator server --workspace workspace/ --tree-alg CCF --use-lro
+$ scitt-emulator server --workspace workspace/ --use-lro
 ```
 
 The current emulator notary (create-statement) implementation will sign
@@ -278,10 +279,7 @@ encoding of the `kid` without padding.
 
 - [`https://transparency.example/.well-known/scitt-keys/{kid_value}`](https://datatracker.ietf.org/doc/html/draft-ietf-scitt-scrapi-11#name-individual-transparency-ser)
 
-If `/.well-known/scitt-keys` is absent, resolution falls back to the deprecated
-`/.well-known/transparency-configuration` resource, which returns JSON with the
-public keys in its `jwks.keys` array. That resource is from an early SCRAPI
-revision and no longer appears in the document; see
+Resolution is from `/.well-known/scitt-keys` only; see
 [ADR 0003](adrs/0003-cose-key-set-key-discovery.md).
 
 

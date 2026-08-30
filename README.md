@@ -45,35 +45,25 @@ conda activate scitt
 
 ## Start the Proxy Server
 
-The proxy server supports 3 tree algorithms currently:
-
-- 'RFC9162_SHA256' uses the emulator server to create and verify Receipts as COSE Sign1 messages carrying [RFC 9162](https://www.rfc-editor.org/rfc/rfc9162.html) inclusion proofs, as described in Section 7 of [RFC 9943](https://www.rfc-editor.org/rfc/rfc9943.html)
-- 'CCF' uses the emulator server to create and verify receipts using the CCF tree algorithm. It predates COSE Receipts and produces a structure with no counterpart in the current documents; see [ADR 0005](docs/adrs/0005-cose-receipts.md)
-- 'RKVST' uses the RKVST production SaaS server to create and verify  receipts using native Merkle trees
+The proxy server implements one verifiable data structure, `RFC9162_SHA256`:
+it creates and verifies Receipts as COSE Sign1 messages carrying
+[RFC 9162](https://www.rfc-editor.org/rfc/rfc9162.html) inclusion proofs, as
+described in Section 7 of [RFC 9943](https://www.rfc-editor.org/rfc/rfc9943.html).
 
 **Note:** _the emulator is for experimentation only and not recommended for production use._
 
 ### Start a Fake Emulated SCITT Service
 
-1. Start the service, under the `/workspace` directory, using `RFC9162_SHA256`
+1. Start the service, under the `/workspace` directory
 
     ```sh
-    ./scitt-emulator.sh server --workspace workspace/ --tree-alg RFC9162_SHA256
+    ./scitt-emulator.sh server --workspace workspace/
     ```
 
 1. The server is running at http://localhost:8000/ and uses the `workspace/` folder to store the service parameters and service state  
   **Note:** _The default port is `8000` but can be changed with the `--port` argument._
 1. Start another shell to run the test scripts, leaving the above shell for diagnostic output
 1. Skip to [Create Claims](#create-claims)
-
-### Start an RKVST SCITT Proxy Service
-
-1. Start the service, under the `/workspace` directory, using RKVST  
-  The default port is `8000` but can be changed with the `--port` argument.
-
-    ```sh
-    ./scitt-emulator.sh server --workspace workspace/ --tree-alg RKVST
-    ```
 
 ### Executing Commands
 
@@ -95,7 +85,7 @@ it with `--rate-limit-requests` and `--rate-limit-period` to exercise the `429`
 response:
 
 ```sh
-./scitt-emulator.sh server --workspace workspace/ --tree-alg RFC9162_SHA256 \
+./scitt-emulator.sh server --workspace workspace/ \
     --rate-limit-requests 100 --rate-limit-period 60
 ```
 
@@ -107,16 +97,13 @@ produced: `Bad Signature Algorithm`, `Payload Missing`, and `Rejected` for a
 statement whose signature does not verify against its Issuer's key.
 
 ```sh
-./scitt-emulator.sh server --workspace workspace/ --tree-alg RFC9162_SHA256 --verify-signature
+./scitt-emulator.sh server --workspace workspace/ --verify-signature
 ```
 
-The following resources are emulator extensions or are deprecated, and are not
-part of SCRAPI. See [docs/adrs/](docs/adrs/).
+The following resource is an emulator extension and is not part of SCRAPI. See
+[docs/adrs/](docs/adrs/).
 
 - `GET /entries/<entry_id>/statement` - retrieve the registered COSE_Sign1 Signed Statement. An emulator extension; SCRAPI has no resource for this.
-- `GET /entries/<entry_id>/receipt` - deprecated, superseded by `GET /entries/<entry_id>`
-- `GET /operations/<operation_id>` - deprecated, superseded by polling `GET /entries/<entry_id>`
-- `GET /.well-known/transparency-configuration` - deprecated, superseded by `GET /.well-known/scitt-keys`
 
 **Note:** The `submit-claim` and `retrieve-claim` commands use the default service URL `http://127.0.0.1:8000` which can be changed with the `--url` argument.
 They can be used with the built-in server or an external service implementation.
@@ -212,14 +199,15 @@ The format of this file is not standardized and is currently:
 ```json
 {
     "serviceId": "emulator",
-    "treeAlgorithm": "CCF",
+    "treeAlgorithm": "RFC9162_SHA256",
     "signatureAlgorithm": "ES256",
-    "insertPolicy": "*",
-    "serviceCertificate": "-----BEGIN CERTIFICATE-----..."
+    "issuer": "transparency.example",
+    "serviceCoseKey": "-----base64url COSE Key-----"
 }
 ```
 
-`"signatureAlgorithm"` and `"serviceCertificate"` are additional parameters specific to the [`CCF` tree algorithm](https://ietf-scitt.github.io/draft-birkholz-scitt-receipts/draft-birkholz-scitt-receipts.html#name-additional-parameters).
+`"serviceCoseKey"` is the public COSE Key the service signs Receipts with, so a
+Receipt can be verified from the service parameters alone.
 
 To view the file:
 
@@ -236,23 +224,14 @@ The following websites can be used to inspect COSE and CBOR files:
 
 ## Code Structure
 
-`scitt_emulator/scitt.py` contains the core SCITT algorithms that are agnostic of a specific tree algorithm.
+`scitt_emulator/scitt.py` contains the core SCITT service: registration, Receipt
+resolution, and the shared state machine.
 
 `scitt_emulator/rfc9162_sha256.py` is the implementation of the `RFC9162_SHA256` verifiable data structure, whose Receipts are COSE Sign1 messages as described in [Section 7 of RFC 9943](https://www.rfc-editor.org/rfc/rfc9943.html#name-receipts).
-
-`scitt_emulator/ccf.py` is the implementation of the [CCF tree algorithm](https://ietf-scitt.github.io/draft-birkholz-scitt-receipts/draft-birkholz-scitt-receipts.html#name-ccf-tree-algorithm).
-For each claim, a receipt is generated using a fake but valid Merkle tree that is independent of other submitted claims.
-A real CCF service would maintain a single Merkle tree covering all submitted claims and auxiliary entries.
-
-`scitt_emulator/rkvst.py` is a simple REST proxy that takes SCITT standard API calls and routes them through to the [RKVST production SaaS service](https://app.rkvst.io).
-Each claim is stored in a Merkle tree underpinning a Quorum blockchain and receipts contain valid, verifiable inclusion proofs for the claim in that Merkle proof.
-[More docs on receipts here](https://docs.rkvst.com/platform/overview/scitt-receipts/).
 
 `scitt_emulator/server.py` is a simple Flask server that acts as a SCITT transparency service.
 
 `scitt_emulator/client.py` is a CLI that supports creating claims, submitting claims to and retrieving receipts from the server, and verifying receipts.
-
-In order to add a new tree algorithm, a file like `scitt_emulator/ccf.py` must be created and the containing class be added in `scitt_emulator/tree_algs.py`.
 
 ## Run Tests
 
