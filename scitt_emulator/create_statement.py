@@ -75,8 +75,17 @@ def create_claim(
         key.import_from_pem(private_key_pem_path.read_bytes())
     else:
         key = key.generate(kty="EC", crv="P-384")
-    # https://python-cwt.readthedocs.io/en/stable/algorithms.html
-    alg = key.key_curve.replace("P-", "ES")
+    # Map the JWK curve to the COSE algorithm identifier. String replacement
+    # ("P-384" -> "ES384") only holds for P-256/P-384; P-521 needs an explicit
+    # mapping, and the curves the pycose EC2 path cannot sign with are rejected
+    # outright rather than failing later with a less clear error.
+    alg = {
+        "P-256": "ES256",
+        "P-384": "ES384",
+        "P-521": "ES512",
+    }.get(key.key_curve)
+    if alg is None:
+        raise ValueError(f"Unsupported signing key curve: {key.key_curve!r}")
     kid = key.thumbprint()
     key_as_pem_bytes = key.export_to_pem(private_key=True, password=None)
     # cwt_cose_key = cwt.COSEKey.generate_symmetric_key(alg=alg, kid=kid)
@@ -160,13 +169,9 @@ def create_claim(
     if private_key_pem_path and not private_key_pem_path.exists():
         private_key_pem_path.write_bytes(key_as_pem_bytes)
 
-    # https://github.com/TimothyClaeys/pycose/blob/e527e79b611f6cc6673bbb694056a7468c2eef75/pycose/messages/sign1message.py#L66C9-L79
-    msg.signature = b""
-    # https://github.com/TimothyClaeys/pycose/blob/e527e79b611f6cc6673bbb694056a7468c2eef75/pycose/messages/cosemessage.py#L143
-    claim = msg.encode(tag=True, sign=False)
-
-    # https://www.ietf.org/archive/id/draft-ietf-scitt-architecture-10.html#appendix-B.2-5
-    # signed statement and statement are identical AFAIK
+    # The URN identifies the Signed Statement as registered, so it is derived
+    # from the full COSE_Sign1 bytes written above (signature included) — the
+    # same bytes entry_id_for_claim hashes.
     message_type = "signed-statement"
 
     hash_name = "sha256"

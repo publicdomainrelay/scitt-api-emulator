@@ -21,6 +21,7 @@ from scitt_emulator.cose_keys import (
     COSE_KEY_KTY,
     COSE_KEY_TYPE_EC2,
     base64url_encode,
+    cose_key_thumbprint,
 )
 from scitt_emulator.did_helpers import did_web_to_url
 from scitt_emulator.key_helper_dataclasses import VerificationKey
@@ -173,6 +174,11 @@ def to_object_cose_key(verification_key: VerificationKey) -> Optional[dict]:
             "x": base64url_encode(cose_key[COSE_KEY_EC2_X]),
             "y": base64url_encode(cose_key[COSE_KEY_EC2_Y]),
             "use": "sig",
-            "kid": base64url_encode(cose_key[COSE_KEY_KID]),
+            # kid is optional in a COSE Key (RFC 9052); fall back to the
+            # RFC 9679 thumbprint, which Section 2.2 of draft-ietf-scitt-
+            # scrapi-11 RECOMMENDS as the kid.
+            "kid": base64url_encode(
+                cose_key.get(COSE_KEY_KID) or cose_key_thumbprint(cose_key)
+            ),
         },
     }

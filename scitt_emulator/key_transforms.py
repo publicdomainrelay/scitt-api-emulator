@@ -39,15 +39,9 @@ def preform_verification_key_transforms(
         else:
             raise TypeError(f"importlib.metadata.entry_points returned unknown type: {type(entrypoints)}: {entrypoints!r}")
 
-    key_transform_types = tuple(
-        [
-            list(inspect.signature(key_transform).parameters.values())[0].annotation
-            for key_transform in key_transforms
-        ]
-    )
-
     for verification_key in verification_keys:
         while not verification_key.usable:
+            transforms_before = len(verification_key.transforms)
             # Attempt key transforms
             for key_transform in key_transforms:
                 key = verification_key.transforms[-1]
@@ -72,10 +66,11 @@ def preform_verification_key_transforms(
             if verification_key.cwt and verification_key.cose:
                 verification_key.usable = True
                 break
-            # If we are unable to transform further, raise exception
-            key = verification_key.transforms[-1]
-            if not isinstance(key, key_transform_types):
-                raise NotImplementedError(f"Unable to transform {type(key)} into CWT and COSE keys needed. Transforms available: {key_transforms}. Transform types accepted: {key_transform_types}. Transforms completed: {verification_key.transforms}")
+            # No transform advanced this key into a usable CWT+COSE pair. Skip
+            # it rather than failing the whole issuer: the caller drops
+            # unusable keys, and a later key may still verify.
+            if len(verification_key.transforms) == transforms_before:
+                break
 
     return verification_keys
 

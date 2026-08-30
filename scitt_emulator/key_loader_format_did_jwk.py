@@ -22,8 +22,11 @@ def key_loader_format_did_jwk(
 ) -> List[VerificationKey]:
     if not unverified_issuer.startswith(DID_JWK_METHOD):
         return []
+    encoded = unverified_issuer[len(DID_JWK_METHOD):]
+    # did:jwk carries the JWK as unpadded base64url (RFC 7515 Section 2);
+    # urlsafe_b64decode requires padding, so restore it before decoding.
     key = jwcrypto.jwk.JWK.from_json(
-        base64.urlsafe_b64decode(unverified_issuer[len(DID_JWK_METHOD):]).decode()
+        base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
     )
     return [
         VerificationKey(

@@ -7,6 +7,17 @@ from werkzeug.wrappers import Request
 from scitt_emulator.client import HttpClient
 
 
+# Symmetric algorithms are excluded: accepting e.g. HS256 would let an
+# attacker use the public JWKS key bytes as the HMAC secret, an algorithm-
+# confusion forgery. Only asymmetric families are trusted.
+ASYMMETRIC_SIGNING_ALGORITHMS = {
+    "ES256", "ES384", "ES512",
+    "RS256", "RS384", "RS512",
+    "PS256", "PS384", "PS512",
+    "EdDSA",
+}
+
+
 class OIDCAuthMiddleware:
     def __init__(self, app, config_path):
         self.app = app
@@ -38,7 +49,13 @@ class OIDCAuthMiddleware:
                 return jwt.decode(
                     token,
                     key=jwk_client.get_signing_key_from_jwt(token).key,
-                    algorithms=self.oidc_configs[issuer]["id_token_signing_alg_values_supported"],
+                    algorithms=[
+                        alg
+                        for alg in self.oidc_configs[issuer][
+                            "id_token_signing_alg_values_supported"
+                        ]
+                        if alg in ASYMMETRIC_SIGNING_ALGORITHMS
+                    ],
                     audience=self.config.get("audience", None),
                     issuer=self.oidc_configs[issuer]["issuer"],
                     options={"strict_aud": self.config.get("strict_aud", True),},
