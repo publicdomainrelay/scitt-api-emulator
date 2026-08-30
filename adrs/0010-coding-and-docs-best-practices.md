@@ -46,9 +46,9 @@ classes, then functions and classes. Keep this ordering.
 re-inventing it. The tree contains `Copyright (c) Microsoft Corporation.`,
 `Copyright (c) Microsoft Corporation. All rights reserved.`, and
 `Copyright (c) SCITT Authors` variants. Top-level modules (`scitt.py`,
-`server.py`, `client.py`, `ccf.py`, `rkvst.py`, `cli.py`, `tree_algs.py`) all
-carry one; several helper modules do not. Do not add a header to a file that
-has none, and do not normalise the wording.
+`server.py`, `client.py`, `cli.py`) all carry one; several helper modules do
+not. Do not add a header to a file that has none, and do not normalise the
+wording.
 
 **Imports.** Stdlib first, then third-party, then `scitt_emulator.*`, with
 blank lines between the groups. Do not alphabetise within a group — the
@@ -62,11 +62,10 @@ Keep a constant's exact string value even when it looks odd; names like
 `COSE_Headers_Service_Id` are IANA labels held verbatim.
 
 **Types.** Small `class XError(Exception): pass` classes for domain failures,
-defined at the top of the module (`ClaimInvalidError`, `EntryNotFoundError`,
-`OperationNotFoundError`). Add `__init__`/`__str__` only when the exception
-carries structured data (`ClaimOperationError` in `client.py`). Use
-`@dataclass` for plain data holders and an `@abstractmethod` ABC for an
-extension point.
+defined at the top of the module (`ClaimInvalidError`, `EntryNotFoundError`).
+Add `__init__`/`__str__` only when the exception carries structured data
+(`ClaimOperationError` in `client.py`). Use `@dataclass` for plain data holders
+and an `@abstractmethod` ABC for an extension point.
 
 **Functions.** `snake_case` names. Annotate parameters; annotate returns when
 it is informative and leave them off otherwise — the codebase is deliberately
@@ -94,11 +93,11 @@ status lines (`print(f"A COSE signed Claim was written to: {claim_path}")`);
 this is how the tools report progress, not a debugging leftover.
 
 **Match the codebase's prevailing conventions, including where they are not
-maximalist.** Lines longer than 88 characters are common (`rkvst.py` has 15),
-type hints are incomplete, imports are unsorted, and at least one function is
-misspelled (`preform_verification_key_transforms`). None of these are to be
-fixed as part of a feature change. Running a formatter over a file being
-edited makes the diff look unlike the repository.
+maximalist.** Lines longer than 88 characters are common, type hints are
+incomplete, imports are unsorted, and at least one function is misspelled
+(`preform_verification_key_transforms`). None of these are to be fixed as part
+of a feature change. Running a formatter over a file being edited makes the
+diff look unlike the repository.
 
 ### Server, client, and CLI patterns
 

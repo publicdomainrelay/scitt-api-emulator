@@ -44,11 +44,7 @@ Serve both resources from `scitt_emulator/server.py`, backed by a new
 `scitt_emulator/cose_keys.py`.
 
 * `keys_as_cose_key_set()` is added to `SCITTServiceEmulator` with a default
-  implementation that converts the JWKs the tree algorithms already produce.
-  Tree algorithms whose keys are natively COSE should override it rather than
-  round-tripping through JWK. Doing it this way means the RKVST tree algorithm,
-  whose client library is unpublished and which returns an empty key set, needs
-  no change.
+  implementation that converts the JWKs the emulator already produces.
 * The kid is the RFC 9679 COSE Key Thumbprint over the key's required members,
   encoded with the deterministic encoding of Section 4.2.1 of RFC 8949 and
   hashed with SHA-256. `cbor2`'s canonical encoding is that deterministic
@@ -56,13 +52,7 @@ Serve both resources from `scitt_emulator/server.py`, backed by a new
 * The kid is raw thumbprint bytes, matching the `bstr` type COSE gives `kid`.
   Raw thumbprint bytes are not safe as a URI path segment, so in practice only
   the base64url form appears in URLs. The server still accepts a raw kid when
-  one is URI-safe, so a tree algorithm that assigns text kids works without
-  further change.
-* `/.well-known/transparency-configuration` is retained, serving the same
-  document, with a `Deprecation: true` header and a `Link` header pointing at
-  `/.well-known/scitt-keys` as its successor. The SCRAPI key loader tries
-  `/.well-known/scitt-keys` first and falls back to it, so this emulator can
-  still resolve keys from a Transparency Service that has not been updated.
+  one is URI-safe.
 
 Key retirement (the `Expires`/`Cache-Control` guidance and the retention
 requirements in Section 2.1) is not implemented. The emulator holds a single
@@ -77,12 +67,9 @@ Receipts signed with them may need verifying.
 * Verifiers can discover keys with a CBOR parser alone.
 * kids are reproducible from the key material, so two implementations of this
   emulator over the same key agree on the kid without coordination.
-* Only EC2 keys convert. The emulator's tree algorithms sign with ES256, so
-  this covers everything they produce; a non-EC key raises
-  `UnsupportedKeyTypeError` rather than emitting a malformed COSE Key.
-* Consumers still reading `transparency-configuration` keep working, but are
-  reading a resource that no longer exists in the specification. It is removed
-  once SCRAPI is published as an RFC.
+* Only EC2 keys convert. The emulator signs with ES256, so this covers
+  everything it produces; a non-EC key raises `UnsupportedKeyTypeError` rather
+  than emitting a malformed COSE Key.
 
 [scrapi]: https://datatracker.ietf.org/doc/draft-ietf-scitt-scrapi/11/
 [rfc9679]: https://www.rfc-editor.org/rfc/rfc9679.html

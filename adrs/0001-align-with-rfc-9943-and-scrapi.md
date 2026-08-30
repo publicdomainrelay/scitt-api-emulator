@@ -60,19 +60,7 @@ ADR for the change that met it, is:
 * fresh Receipt re-issuance and key retirement, neither of which the emulator's
   single-key, issue-once storage model supports
   ([ADR 0003](0003-cose-key-set-key-discovery.md),
-  [ADR 0005](0005-cose-receipts.md));
-* the RKVST tree algorithm, which overrides the registration and Receipt
-  methods with SaaS-backed implementations and cannot be run here because its
-  `archivist` client library is unpublished
-  ([ADR 0004](0004-registration-and-receipt-resolution.md));
-* the deprecated resources — `/.well-known/transparency-configuration`,
-  `/operations/{operationId}`, and `/entries/{entryId}/receipt` — which are
-  removed once SCRAPI is published as an RFC.
-
-Where a legacy resource is still useful to existing users of this emulator, it
-is kept and marked deprecated rather than removed outright, so that a single
-change does not break every downstream consumer at once. Deprecated resources
-are removed once the specification is published as an RFC.
+  [ADR 0005](0005-cose-receipts.md)).
 
 ## Consequences
 
@@ -84,10 +72,9 @@ are removed once the specification is published as an RFC.
 * SCRAPI is not yet an RFC. Further revisions will require further alignment
   work; this ADR series records where each decision came from so that the next
   round can tell "we chose this" from "the draft said this".
-* The receipt format change (step 4) is the deepest. The existing `CCF` tree
-  algorithm produces a structure with no counterpart in the current documents,
-  so it is left in place and a specification-conformant algorithm is added
-  alongside it rather than replacing it.
+* The receipt format change (step 4) is the deepest: Receipts became COSE
+  Sign1 messages carrying RFC 9162 inclusion proofs, per RFC 9942 and
+  Section 7 of RFC 9943.
 
 [rfc9943]: https://www.rfc-editor.org/rfc/rfc9943.html
 [scrapi]: https://datatracker.ietf.org/doc/draft-ietf-scitt-scrapi/11/
