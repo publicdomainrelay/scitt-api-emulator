@@ -8,10 +8,9 @@ Accepted
 
 ## Context
 
-Review of [ADR 0004](0004-registration-and-receipt-resolution.md) and
-[ADR 0005](0005-cose-receipts.md) as implemented found that registration
-mutates state shared across requests without any synchronization, while the
-server is threaded. Four defects followed, all reproduced.
+Review of the registration and Receipt flow as implemented found that
+registration mutates state shared across requests without any synchronization,
+while the server is threaded. Four defects followed, all reproduced.
 
 **The Merkle tree race.** `_append_leaf` appended a leaf, then re-read the
 whole log to derive the index, and `_create_receipt` then read the log a

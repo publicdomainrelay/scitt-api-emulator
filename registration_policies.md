@@ -279,8 +279,7 @@ encoding of the `kid` without padding.
 
 - [`https://transparency.example/.well-known/scitt-keys/{kid_value}`](https://datatracker.ietf.org/doc/html/draft-ietf-scitt-scrapi-11#name-individual-transparency-ser)
 
-Resolution is from `/.well-known/scitt-keys` only; see
-[ADR 0003](adrs/0003-cose-key-set-key-discovery.md).
+Resolution is from `/.well-known/scitt-keys` only.
 
 
 To use this method of resolution create the statement using the FQDN of the
