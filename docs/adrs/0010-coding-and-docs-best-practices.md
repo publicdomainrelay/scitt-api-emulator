@@ -134,13 +134,12 @@ Code samples in docs are load-bearing: `tests/test_docs.py` parses
 marker followed by a fenced block, writes them to disk, and runs them. Any doc
 code sample should be written so it can survive that treatment.
 
-**ADRs.** The format is fixed by the existing series (`docs/adrs/0001` to
-`0008`): `# N. Title`, a `Date: YYYY-MM-DD` line, then `## Status`, `##
-Context`, `## Decision`, `## Consequences`, with reference links at the foot.
-Context is evidence-based — quote the spec, cite `grep` results and file
-reads. Decisions are concrete and name the files they change. Consequences
-are bullet lists of what the decision costs and buys. New ADRs copy that
-shape exactly.
+**ADRs.** The format is fixed by the existing series: `# N. Title`, a
+`Date: YYYY-MM-DD` line, then `## Status`, `## Context`, `## Decision`, `##
+Consequences`, with reference links at the foot. Context is evidence-based —
+quote the spec, cite `grep` results and file reads. Decisions are concrete and
+name the files they change. Consequences are bullet lists of what the decision
+costs and buys. New ADRs copy that shape exactly.
 
 **README.** `README.md` is a plain, practical guide: short intro, numbered
 steps with commands, minimal prose, links to the IETF drafts that govern the

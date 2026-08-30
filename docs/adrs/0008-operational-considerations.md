@@ -9,8 +9,8 @@ Accepted
 ## Context
 
 Section 5 of [draft-ietf-scitt-scrapi-11][scrapi] is new in `-11`; it did not
-exist in `-09`. The alignment work in ADRs 0002 to 0005 read Section 2
-carefully and did not read Section 5, so a normative requirement was missed.
+exist in `-09`. The earlier alignment work read Section 2 carefully and did not
+read Section 5, so a normative requirement was missed.
 
 **Section 5.3, Rate Limiting:**
 

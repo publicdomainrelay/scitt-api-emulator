@@ -15,11 +15,11 @@ Service must do with a Signed Statement before recording it:
 > [STD96] and MUST verify the signature of the Signed Statement with the
 > signature algorithm and verification key of the Issuer per [RFC9360].
 
-The emulator has never done this. Its stated behaviour, in its own code and
-[ADR 0001](0001-align-with-rfc-9943-and-scrapi.md), is that it does not verify
-the claim signature and does not apply registration policies; verification is
-left to the external Registration Policy, which the policy engine plugin
-implements. Because verification never ran, the three registration-time errors
+The emulator has never done this. Its stated behaviour, in its own code, is
+that it does not verify the claim signature and does not apply registration
+policies; verification is left to the external Registration Policy, which the
+policy engine plugin implements. Because verification never ran, the three
+registration-time errors
 of Section 2.3.3 of [draft-ietf-scitt-scrapi-11][scrapi] that depend on it were
 unreachable:
 
@@ -31,14 +31,12 @@ unreachable:
 anything, so this was internally consistent. It was also not a Transparency
 Service that Section 6.3 describes.)
 
-A review of the emulator also turned up a regression introduced when key
-discovery moved to the COSE Key Set in
-[ADR 0003](0003-cose-key-set-key-discovery.md): a key resolved from
-`/.well-known/scitt-keys` could not be converted to the JWK object a
-Registration Policy validates against, so any policy relying on the current
-discovery resource failed with "Failed to convert issuer key to JSON schema
-verifiable object". The docs test that exercises the policy engine caught it;
-nothing else did.
+A review of the emulator also turned up a regression in the COSE Key Set key
+discovery: a key resolved from `/.well-known/scitt-keys` could not be converted
+to the JWK object a Registration Policy validates against, so any policy
+relying on the current discovery resource failed with "Failed to convert
+issuer key to JSON schema verifiable object". The docs test that exercises the
+policy engine caught it; nothing else did.
 
 ## Decision
 
@@ -78,8 +76,8 @@ the server but never raised; ADR records the gap.
 
 **Fix the COSE-to-JWK gap.** Add `to_object_cose_key`, so a key discovered from
 `/.well-known/scitt-keys` converts to the JWK object a policy validates. This
-closes the ADR 0003 regression and is what lets signature verification and the
-policy engine agree on keys from the current discovery resource.
+is what lets signature verification and the policy engine agree on keys from
+the current discovery resource.
 
 * The four failing docs tests that this change also fixed were two regressions
   from this series, one pre-existing unfinished test, and one race.

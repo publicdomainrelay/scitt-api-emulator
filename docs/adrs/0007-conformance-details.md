@@ -8,10 +8,9 @@ Accepted
 
 ## Context
 
-A requirement-by-requirement audit of [ADRs 0002 to 0005](README.md) against
-[draft-ietf-scitt-scrapi-11][scrapi] Section 2 and RFC 9943 Sections 6 and 7
-found five gaps that the implementation had missed, plus two robustness
-defects in the code that reads untrusted input.
+A requirement-by-requirement audit against [draft-ietf-scitt-scrapi-11][scrapi]
+Section 2 and RFC 9943 Sections 6 and 7 found five gaps that the implementation
+had missed, plus two robustness defects in the code that reads untrusted input.
 
 **The thumbprint encoding was not the one RFC 9679 requires.**
 `cose_key_thumbprint` used `cbor2.dumps(..., canonical=True)` with a comment
@@ -88,11 +87,11 @@ characters outside the alphabet were discarded rather than rejected and
 
 ## Consequences
 
-* Signed Statements change shape again: no `393`, no `394: nil`. Combined with
-  [ADR 0005](0005-cose-receipts.md), a statement from before this series is
-  not accepted by it. The emulator exists to be an interoperability target for
-  the current documents, and it now emits exactly the protected header of
-  Figure 5 — `{1, 3, 4, 15}` — with an empty unprotected header.
+* Signed Statements change shape again: no `393`, no `394: nil`. A statement
+  from before this series is not accepted by it. The emulator exists to be an
+  interoperability target for the current documents, and it now emits exactly
+  the protected header of Figure 5 — `{1, 3, 4, 15}` — with an empty
+  unprotected header.
 * Rejecting a statement without `iss`/`sub` is stricter than before. It is
   what Section 6 requires, and a Receipt is the thing that would otherwise be
   non-conformant.
