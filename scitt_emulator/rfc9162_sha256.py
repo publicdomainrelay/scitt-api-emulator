@@ -484,18 +484,6 @@ class RFC9162SHA256SCITTServiceEmulator(SCITTServiceEmulator):
             )
         )
 
-    # The base class's countersignature-based receipt machinery does not apply.
-
-    def create_receipt_contents(self, countersign_tbi: bytes, entry_id: str):
-        raise NotImplementedError(
-            "RFC9162_SHA256 Receipts are COSE Sign1 messages, not countersignatures"
-        )
-
-    def verify_receipt_contents(self, receipt_contents: list, countersign_tbi: bytes):
-        raise NotImplementedError(
-            "RFC9162_SHA256 Receipts are COSE Sign1 messages, not countersignatures"
-        )
-
     def verify_receipt(self, cose_path: Path, receipt_path: Path):
         """
         Verify a Receipt against the Signed Statement it is about.

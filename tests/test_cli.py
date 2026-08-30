@@ -64,7 +64,6 @@ def test_client_cli(use_lro: bool, tmp_path):
 
     with Service(
         {
-            "tree_alg": "CCF",
             "workspace": workspace_path,
             "error_rate": 0.1,
             "use_lro": use_lro
@@ -263,7 +262,6 @@ def test_client_cli_token(tmp_path):
             {
                 "middleware": OIDCAuthMiddleware,
                 "middleware_config_path": middleware_config_path,
-                "tree_alg": "CCF",
                 "workspace": workspace_path,
                 "error_rate": 0.1,
                 "use_lro": False,

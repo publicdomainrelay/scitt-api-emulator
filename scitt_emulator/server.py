@@ -23,14 +23,12 @@ from scitt_emulator.cose_keys import (
     encode_cose_key_set,
 )
 from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE, encode_problem_details
-from scitt_emulator.tree_algs import TREE_ALGS
-from scitt_emulator.verify_statement import verify_statement
+from scitt_emulator.rfc9162_sha256 import RFC9162SHA256SCITTServiceEmulator
 from scitt_emulator.plugin_helpers import entrypoint_style_load
 from scitt_emulator.rate_limit import RateLimiter, client_identity
 from scitt_emulator.scitt import (
     EntryNotFoundError,
     ClaimInvalidError,
-    OperationNotFoundError,
     RegistrationFailedError,
     RegistrationRunningError,
     PayloadMissingError,
@@ -103,9 +101,7 @@ def create_flask_app(config):
     os.makedirs(storage_path, exist_ok=True)
     app.service_parameters_path = workspace_path / "service_parameters.json"
 
-    clazz = TREE_ALGS[app.config["tree_alg"]]
-
-    app.scitt_service = clazz(
+    app.scitt_service = RFC9162SHA256SCITTServiceEmulator(
         storage_path=storage_path, service_parameters_path=app.service_parameters_path
     )
     app.scitt_service.initialize_service()
@@ -239,33 +235,6 @@ def create_flask_app(config):
         response.headers["Content-Type"] = COSE_KEY_CONTENT_TYPE
         return response
 
-    @app.route("/.well-known/transparency-configuration", methods=["GET"])
-    def get_transparency_configuration():
-        """
-        Deprecated. This resource comes from an early SCRAPI revision and no
-        longer appears in draft-ietf-scitt-scrapi-11, which replaced it with
-        the COSE Key Set at /.well-known/scitt-keys. It is kept for existing
-        consumers of the emulator and will be removed once SCRAPI is
-        published. See docs/adrs/0003-cose-key-set-key-discovery.md.
-        """
-        if is_unavailable():
-            return make_unavailable_error()
-        response = jsonify(
-            {
-                 "issuer": "/",
-                 "registration_endpoint": f"/entries",
-                 "nonce_endpoint": f"/nonce",
-                 "registration_policy": f"/statements/TODO",
-                 "supported_signature_algorithms": ["ES256"],
-                 "jwks": {
-                      "keys": app.scitt_service.keys_as_jwks(),
-                 }
-            }
-        )
-        response.headers["Deprecation"] = "true"
-        response.headers["Link"] = '</.well-known/scitt-keys>; rel="successor-version"'
-        return response
-
     def resolve_receipt(entry_id: str):
         """
         Section 2.4 of draft-ietf-scitt-scrapi-11, Resolve Receipt: 200 once
@@ -307,20 +276,6 @@ def create_flask_app(config):
         if is_unavailable():
             return make_unavailable_error()
         return resolve_receipt(entry_id)
-
-    @app.route("/entries/<string:entry_id>/receipt", methods=["GET"])
-    def get_receipt(entry_id: str):
-        """
-        Deprecated. Section 2.4 of draft-ietf-scitt-scrapi-11 makes the entry
-        resource itself the Receipt resource. Retained so existing consumers
-        of the emulator keep working.
-        """
-        if is_unavailable():
-            return make_unavailable_error()
-        response = resolve_receipt(entry_id)
-        response.headers["Deprecation"] = "true"
-        response.headers["Link"] = f'<{receipt_url(entry_id)}>; rel="successor-version"'
-        return response
 
     @app.route("/entries/<string:entry_id>/statement", methods=["GET"])
     def get_claim(entry_id: str):
@@ -388,31 +343,6 @@ def create_flask_app(config):
         response.headers["Retry-After"] = "1"
         return response
 
-    @app.route("/operations/<string:operation_id>", methods=["GET"])
-    def get_operation(operation_id: str):
-        """
-        Deprecated. Operations are not a SCRAPI concept; Section 2.4 of
-        draft-ietf-scitt-scrapi-11 has clients poll the Receipt resource
-        instead. Retained so existing consumers of the emulator keep working.
-        """
-        if is_unavailable():
-            return make_unavailable_error()
-        if not ENTRY_ID_RE.match(operation_id):
-            return make_error(
-                "Invalid locator", "Operation locator is not in a valid form", 400
-            )
-        try:
-            operation = app.scitt_service.get_operation(operation_id)
-        except OperationNotFoundError as e:
-            return make_error("Not Found", str(e), 404)
-        headers = {
-            "Deprecation": "true",
-            "Link": f'<{receipt_url(operation_id)}>; rel="successor-version"',
-        }
-        if operation["status"] == "running":
-            headers["Retry-After"] = "1"
-        return make_response(operation, 200, headers)
-
     return app
 
 
@@ -435,7 +365,6 @@ def cli(fn):
         help="Length in seconds of the rate limit window",
     )
     parser.add_argument("--use-lro", action="store_true", help="Create operations for submissions")
-    parser.add_argument("--tree-alg", required=True, choices=list(TREE_ALGS.keys()))
     parser.add_argument("--workspace", type=Path, default=Path("workspace"))
     parser.add_argument(
         "--middleware",
@@ -456,7 +385,6 @@ def cli(fn):
             {
                 "middleware": args.middleware,
                 "middleware_config_path": args.middleware_config_path,
-                "tree_alg": args.tree_alg,
                 "workspace": args.workspace,
                 "error_rate": args.error_rate,
                 "use_lro": args.use_lro,

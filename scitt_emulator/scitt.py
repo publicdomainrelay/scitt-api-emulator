@@ -8,11 +8,8 @@ from pathlib import Path
 from hashlib import sha256
 import fcntl
 import threading
-import time
 import json
-import uuid
 
-import cbor2
 from pycose.messages import Sign1Message
 import pycose.headers
 
@@ -22,12 +19,6 @@ from scitt_emulator.cose_keys import (
     check_key_identifiers_unambiguous,
     jwk_to_cose_key,
 )
-from scitt_emulator.create_statement import CWTClaims
-
-# temporary receipt header labels, see draft-birkholz-scitt-receipts
-COSE_Headers_Service_Id = "service_id"
-COSE_Headers_Tree_Alg = "tree_alg"
-COSE_Headers_Issued_At = "issued_at"
 
 # permissive insert policy
 MOST_PERMISSIVE_INSERT_POLICY = "*"
@@ -55,10 +46,6 @@ class SignatureVerificationError(ClaimInvalidError):
 
 
 class EntryNotFoundError(Exception):
-    pass
-
-
-class OperationNotFoundError(Exception):
     pass
 
 
@@ -191,33 +178,6 @@ class SCITTServiceEmulator(ABC):
             if cose_key.get(COSE_KEY_KID) == kid:
                 return cose_key
         return None
-
-    @abstractmethod
-    def create_receipt_contents(self, countersign_tbi: bytes, entry_id: str):
-        raise NotImplementedError
-
-    @abstractmethod
-    def verify_receipt_contents(receipt_contents: list, countersign_tbi: bytes):
-        raise NotImplementedError
-
-    def get_operation(self, operation_id: str) -> dict:
-        """
-        Deprecated. Operations are not a SCRAPI concept; Section 2.4 of
-        draft-ietf-scitt-scrapi-11 has clients poll the Receipt resource
-        instead. Retained so existing consumers of the emulator keep working.
-        """
-        operation_path = self.operations_path / f"{operation_id}.json"
-        try:
-            with open(operation_path, "r") as f:
-                operation = json.load(f)
-        except FileNotFoundError:
-            raise OperationNotFoundError(f"Operation {operation_id} not found")
-        
-        if operation["status"] == "running":
-            # Pretend that the service finishes the operation after
-            # the client having checked the operation status once.
-            operation = self._finish_operation(operation)
-        return operation
 
     def get_entry(self, entry_id: str) -> dict:
         try:
@@ -554,100 +514,3 @@ class SCITTServiceEmulator(ABC):
             json.dump(operation, f)
 
         return operation
-
-    def _create_receipt(self, claim: bytes, entry_id: str):
-        # Validate claim
-        # Note: This emulator does not verify the claim signature and does not apply
-        # registration policies.
-        try:
-            msg = Sign1Message.decode(claim, tag=True)
-        except:
-            raise ClaimInvalidError("Claim is not a valid COSE message")
-        if not isinstance(msg, Sign1Message):
-            raise ClaimInvalidError("Claim is not a COSE_Sign1 message")
-        if pycose.headers.Algorithm not in msg.phdr:
-            raise ClaimInvalidError("Claim does not have an algorithm header parameter")
-        if pycose.headers.ContentType not in msg.phdr:
-            raise ClaimInvalidError(
-                "Claim does not have a content type header parameter"
-            )
-        if CWTClaims not in msg.phdr:
-            raise ClaimInvalidError("Claim does not have a CWTClaims header parameter")
-
-        # Extract fields of COSE_Sign1 for countersigning
-        outer = cbor2.loads(claim)
-        [phdr, uhdr, payload, sig] = outer.value
-
-        # Create countersigner protected header
-        sign_protected = cbor2.dumps(
-            {
-                COSE_Headers_Service_Id: self.service_parameters["serviceId"],
-                COSE_Headers_Tree_Alg: self.service_parameters["treeAlgorithm"],
-                COSE_Headers_Issued_At: int(time.time()),
-            }
-        )
-
-        # Compute countersign to-be-included
-        countersign_tbi = create_countersign_to_be_included(
-            phdr, sign_protected, payload, sig
-        )
-
-        # Tree algorithm receipt contents
-        receipt_contents = self.create_receipt_contents(countersign_tbi, entry_id)
-
-        # Create receipt
-        receipt = cbor2.dumps([sign_protected, receipt_contents])
-
-        # Store receipt
-        receipt_path = self.storage_path / f"{entry_id}.receipt.cbor"
-        with open(receipt_path, "wb") as f:
-            f.write(receipt)
-        print(f"Receipt written to {receipt_path}")
-
-    def get_receipt(self, entry_id: str):
-        receipt_path = self.storage_path / f"{entry_id}.receipt.cbor"
-        try:
-            with open(receipt_path, "rb") as f:
-                receipt = f.read()
-        except FileNotFoundError:
-            raise EntryNotFoundError(f"Entry {entry_id} not found")
-        return receipt
-
-    def verify_receipt(self, cose_path: Path, receipt_path: Path):
-        with open(cose_path, "rb") as f:
-            envelope = f.read()
-
-        outer = cbor2.loads(envelope)
-        assert outer.tag == Sign1Message.cbor_tag
-        [phdr, uhdr, payload, sig] = outer.value
-
-        with open(receipt_path, "rb") as f:
-            receipt = cbor2.loads(f.read())
-
-        [sign_protected, receipt_contents] = receipt
-
-        countersign_tbi = create_countersign_to_be_included(
-            phdr, sign_protected, payload, sig
-        )
-
-        sign_protected_decoded = cbor2.loads(sign_protected)
-        tree_alg = sign_protected_decoded[COSE_Headers_Tree_Alg]
-        assert tree_alg == self.tree_alg
-
-        self.verify_receipt_contents(receipt_contents, countersign_tbi)
-
-
-def create_countersign_to_be_included(
-    body_protected, sign_protected, payload, signature
-):
-    context = "CounterSignatureV2"
-    countersign_structure = [
-        context,
-        body_protected,
-        sign_protected,
-        b"",  # no external AAD
-        payload,
-        [signature],
-    ]
-    to_be_signed = cbor2.dumps(countersign_structure)
-    return to_be_signed

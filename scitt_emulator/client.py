@@ -3,7 +3,6 @@
 
 from typing import Optional
 from pathlib import Path
-import json
 import random
 import time
 
@@ -11,7 +10,7 @@ import httpx
 
 from scitt_emulator import create_statement
 from scitt_emulator.errors import CONTENT_TYPE as PROBLEM_DETAILS_CONTENT_TYPE, decode_problem_details
-from scitt_emulator.tree_algs import TREE_ALGS
+from scitt_emulator.rfc9162_sha256 import RFC9162SHA256SCITTServiceEmulator
 
 DEFAULT_URL = "http://127.0.0.1:8000"
 CONNECT_RETRIES = 3
@@ -281,11 +280,9 @@ def retrieve_receipt(url: str, entry_id: Path, receipt_path: Path, client: HttpC
 
 
 def verify_receipt(cose_path: Path, receipt_path: Path, service_parameters_path: Path):
-    with open(service_parameters_path) as f:
-        service_parameters = json.load(f)
-
-    clazz = TREE_ALGS[service_parameters["treeAlgorithm"]]
-    service = clazz(service_parameters_path=service_parameters_path)
+    service = RFC9162SHA256SCITTServiceEmulator(
+        service_parameters_path=service_parameters_path
+    )
     service.verify_receipt(cose_path, receipt_path)
     print("Receipt verified")
 

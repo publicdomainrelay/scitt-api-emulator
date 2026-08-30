@@ -25,7 +25,6 @@ REGISTRATIONS = 24
 def make_service(tmp_path, use_lro=False):
     return Service(
         {
-            "tree_alg": "RFC9162_SHA256",
             "workspace": tmp_path / "workspace",
             "error_rate": 0,
             "use_lro": use_lro,

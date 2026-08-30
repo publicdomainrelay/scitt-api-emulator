@@ -90,7 +90,8 @@ import pycose
 from pycose.messages import Sign1Message
 from jsonschema import validate, ValidationError
 
-from scitt_emulator.scitt import ClaimInvalidError, CWTClaims
+from scitt_emulator.scitt import ClaimInvalidError
+from scitt_emulator.create_statement import CWTClaims
 from scitt_emulator.verify_statement import verify_statement
 from scitt_emulator.key_helpers import verification_key_to_object
 

@@ -38,7 +38,6 @@ from .test_cli import Service
 def make_service(tmp_path, use_lro=False):
     return Service(
         {
-            "tree_alg": "CCF",
             "workspace": tmp_path / "workspace",
             "error_rate": 0,
             "use_lro": use_lro,
@@ -250,19 +249,6 @@ def test_individual_key_not_found(service):
     assert problem_details[-1] == "No such key"
 
 
-def test_transparency_configuration_is_deprecated(service):
-    """
-    The transparency configuration resource is from an early SCRAPI revision
-    and no longer appears in the document. It is retained for existing
-    consumers, and marked deprecated pointing at its replacement.
-    """
-    response = httpx.get(f"{service.url}/.well-known/transparency-configuration")
-
-    assert response.status_code == 200
-    assert response.headers["Deprecation"] == "true"
-    assert "/.well-known/scitt-keys" in response.headers["Link"]
-
-
 def test_kid_url_segments_for_uri_safe_kid():
     """
     Section 2.2: if a kid value is safe for use as a URI path segment without
@@ -377,23 +363,6 @@ def test_receipt_resource_not_found(service):
     problem_details = cbor2.loads(response.content)
     assert problem_details[-1] == "Not Found"
     assert "no-such-entry" in problem_details[-2]
-
-
-def test_deprecated_receipt_subresource(service):
-    """
-    The /entries/{entryId}/receipt sub-resource is from an early SCRAPI
-    revision; Section 2.4 makes the entry resource itself the Receipt
-    resource. It is retained and marked deprecated.
-    """
-    location = register(service, signed_statement()).headers["Location"]
-    entry_id = location.rsplit("/", 1)[-1]
-
-    response = httpx.get(f"{service.url}/entries/{entry_id}/receipt")
-
-    assert response.status_code == 200
-    assert response.headers["Deprecation"] == "true"
-    assert response.headers["Link"] == f'<{location}>; rel="successor-version"'
-    assert response.content == httpx.get(location).content
 
 
 def test_every_error_response_is_concise_problem_details(service):

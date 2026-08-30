@@ -27,7 +27,6 @@ from tests.test_cli import Service
 def rate_limited_service(tmp_path):
     with Service(
         {
-            "tree_alg": "RFC9162_SHA256",
             "workspace": tmp_path / "workspace",
             "error_rate": 0,
             "use_lro": False,
@@ -101,7 +100,6 @@ def test_client_retries_a_429_and_succeeds(tmp_path):
     """
     with Service(
         {
-            "tree_alg": "RFC9162_SHA256",
             "workspace": tmp_path / "workspace",
             "error_rate": 0,
             "use_lro": False,
@@ -165,7 +163,6 @@ def test_worth_retrying():
 def test_rate_limiting_is_off_by_default(tmp_path):
     with Service(
         {
-            "tree_alg": "RFC9162_SHA256",
             "workspace": tmp_path / "workspace",
             "error_rate": 0,
             "use_lro": False,

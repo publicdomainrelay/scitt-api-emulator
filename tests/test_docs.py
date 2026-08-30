@@ -146,7 +146,6 @@ def docutils_find_code_samples(nodes):
 
 def create_flask_app_nop_scitt_scrapi(config):
     # Used to test resolving keys from scrapi
-    # /.well-known/transparency-configuration
     app = Flask("nop")
 
     app.config.update(dict(DEBUG=True))
@@ -197,7 +196,6 @@ def test_docs_registration_policies(create_flask_app_notary_identity, tmp_path):
         create_flask_app=create_flask_app_notary_identity,
     ) as oidc_service, Service(
         {
-            "tree_alg": "CCF",
             "workspace": workspace_path,
             "error_rate": 0,
             "use_lro": True,
@@ -339,7 +337,6 @@ def test_phase_0_relying_party_workload_identity_token_response(tmp_path):
                 # List form, matching how the server CLI passes --middleware.
                 "middleware": [OIDCAuthMiddleware],
                 "middleware_config_path": [middleware_config_path],
-                "tree_alg": "CCF",
                 "workspace": workspace_path,
                 "error_rate": 0.1,
                 "use_lro": False,

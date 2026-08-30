@@ -44,7 +44,6 @@ SUBJECT = "vendor.product.example"
 def service(tmp_path):
     with Service(
         {
-            "tree_alg": "RFC9162_SHA256",
             "workspace": tmp_path / "workspace",
             "error_rate": 0,
             "use_lro": False,
