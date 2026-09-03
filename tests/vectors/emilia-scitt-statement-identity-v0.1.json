@@ -1,0 +1,25 @@
+{
+  "id": "emilia-scitt-statement-identity-v0.1",
+  "description": "Generic RFC 9943 ES256 COSE_Sign1 identity fixture: one signing input, two valid envelopes (high-S and canonical low-S).",
+  "source": {
+    "repo": "https://github.com/emiliaprotocol/emilia-protocol",
+    "commit": "e507acdf8efbe8951cb4294801d4c440f0b86a5a",
+    "path": "conformance/composition/scitt-statement-identity-v0.1/vectors.reference.json",
+    "raw_url": "https://raw.githubusercontent.com/emiliaprotocol/emilia-protocol/e507acdf8efbe8951cb4294801d4c440f0b86a5a/conformance/composition/scitt-statement-identity-v0.1/vectors.reference.json",
+    "sha256": "889e410cceec75f4c0955ca9a373d4a8375c00300cbe4d2be375a559958de697"
+  },
+  "expected_structure": {
+    "cose_tag": 18,
+    "protected_labels": [1, 3, 4, 15],
+    "alg": -7,
+    "content_type": "application/example+json",
+    "unprotected_empty": true,
+    "receipts_label_394": "omitted"
+  },
+  "not_covered": [
+    "Not an EP-SCITT-STATEMENT-v1 authorization result.",
+    "No Transparency Service registration is claimed or tested.",
+    "Signature verification is out of scope for the structural test; this vector checks SHAPE.",
+    "kid content is unconstrained by RFC 9943 (bstr); this vector does not pin it."
+  ]
+}

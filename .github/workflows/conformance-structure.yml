@@ -1,0 +1,33 @@
+name: rfc9943-structure
+
+# Structural conformance for statements this emulator creates.
+#
+# Asserts the SHAPE RFC 9943 Figure 3 fixes — field set, where CWT_Claims lives,
+# that 394 is omitted rather than nil — and deliberately does NOT pin `alg` or
+# `kid`. Two conformant implementations differ freely on those, so pinning them
+# turns a default change into a red build for no conformance reason.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pycose cwt cbor2 jwcrypto cryptography pytest
+      - name: RFC 9943 Figure 3 structural invariants
+        run: python -m pytest tests/test_rfc9943_structure.py -q
