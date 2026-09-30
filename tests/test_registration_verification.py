@@ -6,6 +6,8 @@ Signed Statement signature verification at registration, as RFC 9943 Section
 """
 import os
 import pathlib
+import subprocess
+import sys
 
 import cbor2
 import httpx
@@ -140,6 +142,56 @@ def test_verify_signature_rejects_a_statement_signed_with_the_wrong_key(tmp_path
     problem_details = cbor2.loads(response.content)
     assert problem_details[-1] == "Rejected"
     assert "signature could not be verified" in problem_details[-2]
+
+
+def test_the_first_request_to_a_fresh_service_is_verified(tmp_path):
+    """
+    A service's first submission is verified like any other.
+
+    pycose resolves a COSE header label to a registered attribute class at
+    decode time and keys its header dictionary by that class, whose hash is
+    the default identity hash. Registration is therefore per-process and has
+    to precede the first decode. It used to arrive with a lazy import inside
+    the verification path, which runs *after* `_validate_submission` has
+    decoded the message -- so the first Signed Statement a `--verify-signature`
+    service ever saw held label 15 as a bare integer, the lookup by class
+    raised `KeyError`, and a perfectly valid statement was answered `400
+    Rejected`. Every later request worked, which is why the rest of this suite
+    never saw it: pytest has imported the whole package before any test runs.
+
+    The check runs in a subprocess for that same reason. `tests.first_request`
+    imports `scitt_emulator.server` and nothing else, so the request it makes
+    is a real first request.
+    """
+    claim_path = tmp_path / "claim.cose"
+    # An ad-hoc key and a did:jwk issuer, which needs no network to resolve.
+    create_statement.create_claim(
+        claim_path,
+        None,
+        "subject",
+        "application/json",
+        b'{"foo": "bar"}',
+    )
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tests.first_request",
+            str(claim_path),
+            str(tmp_path / "workspace"),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, (
+        f"the first request was not verified\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert result.stdout.strip() == "201", result.stdout
 
 
 def test_verification_is_off_by_default(tmp_path):

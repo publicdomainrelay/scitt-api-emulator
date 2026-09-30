@@ -37,6 +37,8 @@ setup(
         "pycose",
         "httpx",
         "flask",
+        "PyJWT",
+        "jwcrypto",
     ],
     extras_require={
         "oidc": [

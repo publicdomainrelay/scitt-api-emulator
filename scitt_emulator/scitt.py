@@ -11,7 +11,19 @@ import threading
 import json
 
 from pycose.messages import Sign1Message
-import pycose.headers
+
+# Importing this registers the COSE header parameters RFC 9943 uses -- the CWT
+# Claims at label 15 above all -- with pycose, which maps a label to a
+# registered class only at decode time. `_validate_submission` below decodes
+# untrusted bytes, so the registration has to be in place before this module
+# can be used at all, which is why this import is at module scope and not
+# inside the function that ends up needing it.
+#
+# `header_value` is used rather than only imported for its side effect: the
+# algorithm read below is the same class-or-integer question, and reading it
+# the same way keeps the two from drifting apart.
+from scitt_emulator.cose_headers import ALG_ID as COSE_HEADER_ALG
+from scitt_emulator.cose_headers import header_value
 
 from scitt_emulator.cose_keys import (
     COSE_KEY_KID,
@@ -282,7 +294,7 @@ class SCITTServiceEmulator(ABC):
 
         # pycose gives back an Algorithm object; its identifier is the COSE
         # registered integer.
-        algorithm = msg.phdr.get(pycose.headers.Algorithm)
+        algorithm = header_value(msg, COSE_HEADER_ALG)
         algorithm_id = getattr(algorithm, "identifier", algorithm)
         if algorithm_id not in SUPPORTED_SIGNATURE_ALGORITHMS:
             raise UnsupportedAlgorithmError(

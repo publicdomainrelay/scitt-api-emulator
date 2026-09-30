@@ -17,40 +17,17 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 # TODO jwcrypto is LGPLv3, is there another option with a permissive licence?
 import jwcrypto.jwk
 
+from scitt_emulator.cose_headers import CWTClaims, Proofs, Receipts, VDS
 from scitt_emulator.did_helpers import DID_JWK_METHOD
 
-
-@pycose.headers.CoseHeaderAttribute.register_attribute()
-class CWTClaims(pycose.headers.CoseHeaderAttribute):
-    # RFC 9597 registers label 15 for CWT Claims in the COSE Header Parameters
-    # registry. Figure 3 of RFC 9943 requires it in the protected header of
-    # Signed Statements and Receipts.
-    identifier = 15
-    fullname = "CWT_CLAIMS"
-
-
-@pycose.headers.CoseHeaderAttribute.register_attribute()
-class Receipts(pycose.headers.CoseHeaderAttribute):
-    identifier = 394
-    fullname = "RECEIPTS"
-
-
-@pycose.headers.CoseHeaderAttribute.register_attribute()
-class VDS(pycose.headers.CoseHeaderAttribute):
-    # Verifiable Data Structure, RFC 9942. Figure 10 of RFC 9943 shows it in
-    # the protected header of a Receipt, identifying the algorithm whose
-    # proofs the Receipt carries.
-    identifier = 395
-    fullname = "VERIFIABLE_DATA_STRUCTURE"
-
-
-@pycose.headers.CoseHeaderAttribute.register_attribute()
-class Proofs(pycose.headers.CoseHeaderAttribute):
-    # Verifiable Data structure Proofs, RFC 9942. Figure 9 of RFC 9943 shows
-    # it in the unprotected header of a Receipt, with inclusion proofs at -1
-    # and consistency proofs at -2.
-    identifier = 396
-    fullname = "PROOFS"
+# `CWTClaims`, `Receipts` and the rest are re-exported rather than defined
+# here. They are the COSE wire format, not a property of writing a claim, and
+# they have to be registered before anything decodes a message --
+# `scitt_emulator.cose_headers` says why. Defining them in the module that
+# *creates* claims is what let their registration arrive after the first
+# decode, and importing them through here as well keeps
+# `from scitt_emulator.create_statement import CWTClaims` working.
+__all__ = ["CWTClaims", "Receipts", "VDS", "Proofs", "create_claim", "cli", "main"]
 
 
 def create_claim(

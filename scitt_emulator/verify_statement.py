@@ -13,8 +13,8 @@ import pycose
 import pycose.keys.ec2
 from pycose.messages import Sign1Message
 
+from scitt_emulator.cose_headers import cwt_claims as read_cwt_claims
 from scitt_emulator.did_helpers import did_web_to_url
-from scitt_emulator.create_statement import CWTClaims
 from scitt_emulator.key_helper_dataclasses import VerificationKey
 from scitt_emulator.key_transforms import preform_verification_key_transforms
 
@@ -50,7 +50,17 @@ def verify_statement(
     # parameter holds a CWT Claims Set, so the iss claim is read directly. It
     # is unverified at this point; it only selects which keys to try, and the
     # outer COSE_Sign1 signature is what is actually verified below.
-    cwt_claims = msg.phdr[CWTClaims]
+    #
+    # Read by label rather than by class: a message decoded before
+    # `scitt_emulator.cose_headers` was imported holds the integer 15 under no
+    # attribute, and a lookup by class would raise KeyError rather than report
+    # that the claims are absent.
+    cwt_claims = read_cwt_claims(msg)
+    if cwt_claims is None:
+        raise ValueError(
+            "Signed Statement has no CWT Claims in its protected header, so "
+            "the Issuer it was signed by cannot be resolved"
+        )
     unverified_issuer = cwt_claims[1]
 
     # Load keys from issuer and attempt verification. Return key used to verify
